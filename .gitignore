@@ -1,5 +1,6 @@
 NOTES.md
-
+outputs/*
+sample-files/*
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
