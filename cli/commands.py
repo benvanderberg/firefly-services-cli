@@ -13,7 +13,7 @@ from utils.auth import retrieve_access_token
 from utils.storage import upload_to_azure_storage
 from utils.rate_limiter import RateLimiter
 from utils.filename import parse_size, parse_prompt_variations, get_variation_filename, get_unique_filename, replace_filename_tokens
-from services.image import generate_image, parse_model_variations, parse_style_ref_variations
+from services.image import generate_image, parse_model_variations, parse_style_ref_variations, generate_similar_image
 from services.speech import generate_speech, get_available_voices
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
@@ -43,15 +43,17 @@ def handle_command(args):
     access_token = retrieve_access_token()
     
     # Handle different commands
-    if args.command == 'image':
+    if args.command in ['image', 'img']:
         handle_image_command(args, access_token)
-    elif args.command == 'tts':
+    elif args.command in ['similar-image', 'sim']:
+        handle_similar_image_command(args, access_token)
+    elif args.command in ['tts', 'speech']:
         handle_tts_command(args, access_token)
     elif args.command == 'dub':
         handle_dub_command(args, access_token)
-    elif args.command == 'voices':
+    elif args.command in ['voices', 'v']:
         handle_voices_command(args, access_token)
-    elif args.command == 'transcribe':
+    elif args.command in ['transcribe', 'trans']:
         handle_transcribe_command(args, access_token)
     else:
         print(f"Unknown command: {args.command}")
@@ -176,6 +178,111 @@ def handle_image_command(args, access_token):
             future.result()
     if not args.silent:
         print("\nAll image generation tasks completed.")
+
+def handle_similar_image_command(args, access_token):
+    """Handle the similar image generation command."""
+    # Parse model variations
+    model_versions = parse_model_variations(args.model, args.debug)
+    total_models = len(model_versions)
+
+    # Parse size if provided
+    size = None
+    if args.size:
+        try:
+            size = parse_size(args.size, model_versions[0], args.debug)
+        except ValueError as e:
+            print(str(e))
+            sys.exit(1)
+
+    # Validate numVariations
+    if not 1 <= args.numVariations <= 4:
+        print("Error: Number of variations (-n) must be between 1 and 4")
+        sys.exit(1)
+
+    # Calculate total number of generations
+    total_generations = total_models * args.numVariations
+
+    # Get throttle limit from environment
+    throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
+    rate_limiter = RateLimiter(throttle_limit, 60)
+
+    if not args.silent:
+        print(f'Generating {total_generations} total variations:')
+        print(f'  • {total_models} model versions')
+        print(f'  • {args.numVariations} variations per model')
+        print(f'Using parallel processing with rate limit of {throttle_limit} calls per minute\n')
+
+    def similar_image_task(model_version, j):
+        rate_limiter.acquire()
+        tokens = {
+            'model': model_version,
+            'size': size,
+            'seeds': args.seeds,
+            'iteration': j + 1,
+            'n': args.numVariations,
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'time': datetime.now().strftime('%H-%M-%S'),
+            'datetime': datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        }
+        if size:
+            tokens.update({
+                'width': size['width'],
+                'height': size['height'],
+                'dimensions': f"{size['width']}x{size['height']}"
+            })
+        base_filename = replace_filename_tokens(args.output, tokens)
+        output_filename = get_unique_filename(base_filename, args.overwrite, args.debug)
+        try:
+            job_info = generate_similar_image(
+                access_token=access_token,
+                image_path=args.input,
+                num_variations=args.numVariations,  # Pass the validated numVariations to the API
+                model_version=model_version,
+                size=size,
+                seeds=args.seeds,
+                debug=args.debug
+            )
+            if args.debug:
+                print(f"Job ID: {job_info['jobId']}")
+                print("Polling for job completion...")
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
+            if 'result' in result and 'outputs' in result['result']:
+                outputs = result['result']['outputs']
+                if outputs:
+                    image_url = outputs[0]['image']['url']
+                    if args.debug:
+                        print(f"Downloading image to {output_filename}...")
+                    download_file(image_url, output_filename, args.silent, args.debug)
+                    return True
+            return False
+        except Exception as e:
+            print(f"Error generating similar image: {str(e)}")
+            if args.debug:
+                import traceback
+                traceback.print_exc()
+            return False
+
+    # Create a list to store all generation tasks
+    tasks = []
+    current_generation = 0
+
+    # Prepare the table header
+    if not args.silent:
+        print("Generation Tasks:")
+        print(f"{'#':<4} {'Model':<15}")
+        print("-" * 20)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=throttle_limit) as executor:
+        for model_version in model_versions:
+            for j in range(args.numVariations):
+                current_generation += 1
+                if not args.silent:
+                    print(f"{current_generation:<4} {model_version:<15}")
+                tasks.append(executor.submit(similar_image_task, model_version, j))
+        for future in concurrent.futures.as_completed(tasks):
+            future.result()
+    if not args.silent:
+        print("\nAll similar image generation tasks completed.")
 
 def handle_tts_command(args, access_token):
     """Handle the text-to-speech command."""

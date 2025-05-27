@@ -4,6 +4,7 @@ import json
 import requests
 from itertools import product
 from utils.storage import upload_to_azure_storage
+from typing import Optional, List, Dict, Any, Union
 
 def generate_image(access_token, prompt, num_generations=1, model_version='image3', content_class='photo',
                   negative_prompt=None, prompt_biasing_locale=None, size=None, seeds=None, debug=False,
@@ -187,4 +188,72 @@ def parse_style_ref_variations(style_ref_str):
             return [s.strip() for s in match.group(1).split(',')]
     
     # If no variations, return single style reference
-    return [style_ref_str] if style_ref_str else [] 
+    return [style_ref_str] if style_ref_str else []
+
+def generate_similar_image(
+    access_token: str,
+    image_path: str,
+    num_variations: int = 1,
+    model_version: str = 'image3',
+    size: Optional[Dict[str, int]] = None,
+    seeds: Optional[List[int]] = None,
+    debug: bool = False
+) -> Dict[str, Any]:
+    """
+    Generate similar images based on a reference image.
+    
+    Args:
+        access_token (str): Adobe authentication token
+        image_path (str): Path to the reference image file
+        num_variations (int): Number of variations to generate (1-4)
+        model_version (str): Model version to use
+        size (dict): Image size with width and height
+        seeds (list): List of seed values for consistent generation
+        debug (bool): Whether to show debug information
+    
+    Returns:
+        dict: Job information including status URL
+    """
+    # Upload the reference image to Azure Storage
+    image_url = upload_to_azure_storage(image_path)
+    
+    # Prepare the request payload
+    payload = {
+        "image": {
+            "source": {
+                "url": image_url
+            }
+        },
+        "numVariations": num_variations
+    }
+    
+    # Add optional parameters if provided
+    if size:
+        payload["size"] = size
+    if seeds:
+        payload["seeds"] = seeds
+    
+    # Prepare headers
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json',
+        'x-api-key': os.environ['FIREFLY_SERVICES_CLIENT_ID'],
+        'x-model-version': model_version
+    }
+    
+    # Make the API request
+    response = requests.post(
+        'https://firefly-api.adobe.io/v3/images/generate-similar-async',
+        headers=headers,
+        json=payload
+    )
+    
+    if debug:
+        print("\nRequest Headers:", json.dumps(headers, indent=2))
+        print("\nRequest Payload:", json.dumps(payload, indent=2))
+        print("\nResponse Status:", response.status_code)
+        print("\nResponse Headers:", json.dumps(dict(response.headers), indent=2))
+        print("\nResponse Body:", json.dumps(response.json(), indent=2))
+    
+    response.raise_for_status()
+    return response.json() 
