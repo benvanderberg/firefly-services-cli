@@ -1,247 +1,167 @@
 # Adobe Firefly Services CLI
 
-A command-line interface for Adobe Firefly Services, supporting image generation, text-to-speech, media dubbing, and transcription capabilities.
+A command-line interface for Adobe Firefly Services, providing access to image generation, text-to-speech, dubbing, and transcription capabilities.
 
-## Prerequisites
+## Features
 
-- Python 3.x
-- Adobe Firefly Services API credentials (Client ID and Client Secret)
-- Azure Storage account and container
+### Image Generation
+- Generate images from text prompts
+- Support for multiple model versions (Image 3, Image 4, Image 4 Ultra)
+- Multiple variations and style references
+- Customizable image dimensions and content classes
+- Token-based output filenames with automatic directory creation
+
+### Text-to-Speech
+- Convert text to speech using various voices
+- Support for multiple languages and locales
+- Input from text or file
+- Customizable output format
+
+### Dubbing
+- Dub audio or video content to different languages
+- Support for multiple output formats (MP4, MP3)
+- Automatic media type detection
+
+### Transcription
+- Transcribe audio or video content
+- Support for multiple languages
+- Optional SRT caption generation
+- Text-only output option
 
 ## Installation
 
-1. Clone this repository
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/firefly-services-cli.git
+cd firefly-services-cli
+```
+
 2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
-3. Create a `.env` file with your credentials:
+
+3. Set up environment variables:
+Create a `.env` file with your Adobe Firefly Services credentials:
 ```
 FIREFLY_SERVICES_CLIENT_ID=your_client_id
 FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret
-AZURE_STORAGE_CONNECTION_STRING=your_azure_storage_connection_string
-AZURE_STORAGE_CONTAINER=your_azure_storage_container_name
-STORAGE_TYPE=azure
 ```
 
-## Available Commands
+## Usage
 
 ### Image Generation
-
-Generate images using Adobe Firefly's image generation API.
-
-```bash
-python ff.py image -prompt "your prompt" -o output.jpg [options]
-```
-
-Options:
-- `-prompt, --prompt`: Text prompt for image generation (required)
-  - Supports variations using [option1,option2,...] syntax
-  - Multiple variations can be combined to generate all possible combinations
-- `-o, --output`: Output file path (required)
-- `-n, --number`: Number of images to generate (1-4, default: 1)
-- `-m, --model`: Firefly model version to use
-  - Choices: `image3`, `image3_custom`, `image4`, `image4_standard`, `image4_ultra`, `ultra`
-  - Shorthand: `image4` = `image4_standard`, `ultra` = `image4_ultra`
-  - Default: `image3`
-- `-c, --content-class`: Type of content to generate
-  - Choices: `photo`, `art`
-  - Default: `photo`
-- `-np, --negative-prompt`: Text describing what to avoid in the generation
-- `-l, --locale`: Locale code for prompt biasing (e.g., en-US)
-- `-s, --size`: Output size in format WIDTHxHEIGHT (e.g., 2048x2048) or named sizes:
-  - For image3: square, square1024, landscape, portrait, widescreen, 7:4, 9:7, 7:9, 16:9, 1:1, 4:3, 3:4
-  - For image4: square, landscape, portrait, widescreen, 9:16, 1:1, 4:3, 3:4, 16:9
-- `--seeds`: Seed values for consistent generation (1-4 values)
-- `-vi, --visual-intensity`: Visual intensity of the generated image (1-10)
-- `-d, --debug`: Show debug information including full HTTP request details
-- `-silent, --silent`: Minimize output messages (only shows final result)
-- `-ow, --overwrite`: Overwrite existing files instead of adding number suffix
-- `-sr, --styleref`: Path to a style reference image file. If STORAGE_TYPE=azure, the file will be uploaded to Azure Storage and the URL will be used.
-
-File Handling:
-- If the output file already exists and `-ow` is not used, a number suffix will be added (e.g., `output_1.jpg`, `output_2.jpg`, etc.)
-- If `-ow` is used, the existing file will be overwritten
-- When generating multiple images (`-n > 1`), files are always numbered sequentially
-- When using prompt variations, the variation values are appended to the filename (e.g., `output_dog.jpg`, `output_cat.jpg`)
-
-Prompt Variations:
-- Use [option1,option2,...] syntax to specify variations in the prompt
-- Multiple variations can be combined to generate all possible combinations
-- The variation values are automatically appended to the output filename
-- For multiple variations, the values are joined with underscores
-
-Examples:
 ```bash
 # Basic image generation
-python ff.py image -prompt "a beautiful sunset over mountains" -o sunset.jpg
+ff.py image -prompt "a cute husky dog" -o output.jpg
 
-# Generate with style reference
-python ff.py image -prompt "a beautiful sunset" -o sunset.jpg -sr style_reference.jpg
+# Multiple variations
+ff.py image -prompt "a [cute,playful] husky dog" -o output.jpg
 
-# Generate with style reference and Azure storage
-python ff.py image -prompt "a beautiful sunset" -o sunset.jpg -sr style_reference.jpg
+# Multiple models
+ff.py image -prompt "a cute husky dog" -m "[image3,image4_ultra]" -o output.jpg
 
-# Generate with single variation
-python ff.py image -prompt "a cute [dog,cat,giraffe,llama] with big eyes" -o animal.jpg
+# Style reference
+ff.py image -prompt "a cute husky dog" -sr style.jpg -o output.jpg
 
-# Generate with multiple variations
-python ff.py image -prompt "a cute [dog,cat] with [blue,green] eyes" -o animal.jpg
+# Custom size
+ff.py image -prompt "a cute husky dog" -s "2048x2048" -o output.jpg
 
-# Generate multiple images with specific model (using shorthand)
-python ff.py image -prompt "a futuristic city" -o city.jpg -n 4 -m ultra
-
-# Generate art with negative prompt and visual intensity
-python ff.py image -prompt "a peaceful garden" -o garden.jpg -c art -np "no people, no buildings" -vi 8
-
-# Generate image with specific size and seeds
-python ff.py image -prompt "a mountain landscape" -o mountain.jpg -s landscape --seeds 12345 67890
-
-# Generate image with minimal output
-python ff.py image -prompt "a cute dog" -o dog.jpg -silent
-
-# Generate image and overwrite if exists
-python ff.py image -prompt "a cute dog" -o dog.jpg -ow
+# Token-based output path
+ff.py image -prompt "a cute husky dog" -o "outputs/{model}/{var1}_{dimensions}_{sr}_{n}.jpg"
 ```
-
-The command will display the model name in a user-friendly format:
-- `image3` → "Firefly Image 3"
-- `image4_standard` or `image4` → "Firefly Image 4"
-- `image4_ultra` or `ultra` → "Firefly Image 4 Ultra"
 
 ### Text-to-Speech
-
-Convert text to speech using Adobe's text-to-speech API. You can provide the text directly or from a file.
-
 ```bash
-# Using direct text input
-python ff.py tts -t "your text" -v "voice_id" -o output.wav [options]
+# Basic text-to-speech
+ff.py tts -t "Hello, world!" -v voice_id -o output.mp3
 
-# Using text from a file
-python ff.py tts -f input.txt -v "voice_id" -o output.wav [options]
+# From file
+ff.py tts -f input.txt -v voice_id -o output.mp3
+
+# Different locale
+ff.py tts -t "Hello, world!" -v voice_id -l fr-FR -o output.mp3
 ```
 
-Options:
-- `-t, --text`: Text to convert to speech (required if not using -f)
-- `-f, --file`: Path to text file containing the content to convert to speech (required if not using -t)
-- `-v, --voice`: Voice ID to use (required)
-- `-o, --output`: Output file path (required, will be saved as WAV)
-- `-l, --locale`: Locale code for the text
-  - Default: `en-US`
-- `-d, --debug`: Show debug information
-
-Examples:
+### Dubbing
 ```bash
-# Basic text-to-speech with direct text
-python ff.py tts -t "Hello, this is a test" -v "v101_1" -o test.wav
+# Dub video
+ff.py dub -i input.mp4 -l fr-FR -o output.mp4
 
-# Text-to-speech from a file
-python ff.py tts -f speech.txt -v "v101_1" -o test.wav
-
-# Text-to-speech with different locale
-python ff.py tts -f french.txt -v "v101_1" -o hello.wav -l "fr-FR"
-
-# Text-to-speech with debug information
-python ff.py tts -t "Hello world" -v "v101_1" -o test.wav -d
+# Dub audio
+ff.py dub -i input.mp3 -l fr-FR -o output.mp3
 ```
 
-### List Available Voices
-
-Get a list of all available voices for text-to-speech.
-
+### Transcription
 ```bash
-python ff.py voices
+# Transcribe video
+ff.py transcribe -i input.mp4 -t video -o output.txt
+
+# Transcribe audio with captions
+ff.py transcribe -i input.mp3 -t audio -c -o output.srt
+
+# Text-only output
+ff.py transcribe -i input.mp4 -t video -text -o output.txt
 ```
 
-This command will display a table of available voices with their:
-- ID
-- Name
-- Gender
-- Style
-- Type
-- Status
+## Output Filename Tokens
 
-Voices are sorted by status (Active first) and then by name.
+When using the `-o` option, you can use the following tokens in the filename:
 
-### Media Dubbing
+- `{prompt}`: The text prompt (truncated to 30 chars)
+- `{date}`: Current date (YYYYMMDD)
+- `{time}`: Current time (HHMMSS)
+- `{datetime}`: Current date and time (YYYYMMDD_HHMMSS)
+- `{seed}`: Seed values used
+- `{sr}`: Style reference filename (without extension)
+- `{model}`: Model version used
+- `{width}`: Image width
+- `{height}`: Image height
+- `{dimensions}`: Image dimensions (WIDTHxHEIGHT)
+- `{n}`: Iteration number
+- `{var1}`, `{var2}`, etc.: Variation values
 
-Dub audio or video content to a different language.
-
+Example:
 ```bash
-python ff.py dub -i "source_url" -l "target_locale" -o output.mp4 [options]
+ff.py image -prompt "a [cute,playful] husky dog" -o "outputs/{model}/{var1}_{dimensions}_{n}.jpg"
 ```
 
-Options:
-- `-i, --input`: URL of the source media file (required)
-- `-l, --locale`: Target language locale code (e.g., fr-FR) (required)
-- `-o, --output`: Output file path (required)
-- `-f, --format`: Output format
-  - Choices: `mp4`, `mp3`
-  - Default: `mp4`
+## Additional Options
 
-Examples:
-```bash
-# Dub video to French
-python ff.py dub -i "https://example.com/video.mp4" -l "fr-FR" -o dubbed.mp4
+### Debug Mode
+Add `-d` or `--debug` to any command to see detailed request and response information.
 
-# Dub audio to Spanish
-python ff.py dub -i "https://example.com/audio.mp3" -l "es-ES" -o dubbed.mp3 -f mp3
+### Silent Mode
+Add `-silent` or `--silent` to minimize output messages.
+
+### Overwrite Files
+Add `-ow` or `--overwrite` to overwrite existing files instead of adding a number suffix.
+
+## Directory Structure
+
+```
+firefly-services-cli/
+├── ff.py                 # Main entry point
+├── cli/
+│   ├── commands.py      # Command handlers
+│   └── parsers.py       # Argument parsers
+├── services/
+│   ├── image.py         # Image generation
+│   ├── speech.py        # Text-to-speech
+│   ├── dubbing.py       # Media dubbing
+│   └── transcription.py # Media transcription
+├── utils/
+│   ├── auth.py          # Authentication
+│   ├── filename.py      # Filename handling
+│   └── storage.py       # Azure storage
+└── config/
+    └── settings.py      # Configuration settings
 ```
 
-### Transcribe Media
+## Contributing
 
-Transcribe audio or video content using Adobe's transcription service. The file will be automatically uploaded to Azure Storage and a presigned URL will be generated for the transcription service.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-```bash
-python ff.py transcribe -i <input_file> -t <media_type> -o <output_file> [options]
-```
+## License
 
-Options:
-- `-i, --input`: Path to the media file to transcribe (required)
-- `-t, --type`: Type of media (audio or video) (required)
-- `-o, --output`: Path to save the transcription output (required)
-- `-l, --locale`: Target language locale code (default: en-US)
-- `-c, --captions`: Generate SRT captions
-- `-text, --text-only`: Extract and save only the transcript text (without timestamps)
-- `-d, --debug`: Show debug information
-
-Supported media formats:
-- Audio: mp3, wav, m4a, aac
-- Video: mp4, mov, avi, mkv
-
-Examples:
-```bash
-# Transcribe a video file with captions
-python ff.py transcribe -i video.mp4 -t video -o transcript.json -l "en-US" -c
-
-# Transcribe an audio file and save only the text
-python ff.py transcribe -i audio.wav -t audio -o transcript.txt -l "fr-FR" -text
-
-# Transcribe with debug information
-python ff.py transcribe -i video.mp4 -t video -o transcript.json -d
-```
-
-The command will:
-1. Upload the file to Azure Blob Storage
-2. Generate a presigned URL valid for 1 hour
-3. Submit the transcription job using the presigned URL
-4. Poll for completion
-5. Return the transcription results
-
-If captions are requested, they will be generated in SRT format. When using `--text-only`, the output will be a plain text file with the transcript content.
-
-## Error Handling
-
-The CLI provides detailed error messages and, when using the debug flag (`-d`), shows:
-- Full HTTP request details
-- Response headers
-- Response body
-- Status codes
-
-## Notes
-
-- All generated files are downloaded to the specified output path
-- For image generation, if multiple images are requested, they will be saved with numbered suffixes
-- The API requires valid Adobe Firefly Services credentials
-- Some features may require specific API access levels
-- When using transcription with `--text-only`, the output will be formatted as paragraphs with double line breaks between segments 
+This project is licensed under the MIT License - see the LICENSE file for details. 
