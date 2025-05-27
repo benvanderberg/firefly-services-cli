@@ -51,42 +51,48 @@ def get_size_mapping(model_version):
     else:
         return {}
 
-def parse_size(size_str, model_version):
+def parse_size(size_str, model_version, debug=False):
     """
-    Parse the size string into width and height.
-    Supports both dimension format (WIDTHxHEIGHT) and named sizes.
+    Parse a size string into width and height.
     
     Args:
-        size_str (str): Size string in either format
-        model_version (str): The model version to use for named sizes
+        size_str (str): Size string in format 'WxH' or a named size
+        model_version (str): Model version to use for size mapping
+        debug (bool): Whether to show debug information
     
     Returns:
-        dict: Size dictionary with width and height
+        dict: Dictionary with width and height
     
     Raises:
         ValueError: If the size format is invalid
     """
-    print(f"Parsing size: {size_str} for model: {model_version}")  # Debug output
+    if debug:
+        print(f"Parsing size: {size_str} for model: {model_version}")
     
-    # First check if it's a named size
+    # Get size mappings for the model version
     size_mapping = get_size_mapping(model_version)
-    print(f"Available sizes: {list(size_mapping.keys())}")  # Debug output
+    if debug:
+        print(f"Available sizes: {list(size_mapping.keys())}")
     
+    # Check if it's a named size
     if size_str in size_mapping:
-        size_str = size_mapping[size_str]
-        print(f"Found named size: {size_str}")  # Debug output
+        if debug:
+            print(f"Found named size: {size_mapping[size_str]}")
+        dimensions = size_mapping[size_str]
+        if debug:
+            print(f"Parsed dimensions: {dimensions}")
+        # Parse the dimensions string into width and height
+        width, height = map(int, dimensions.split('x'))
+        return {'width': width, 'height': height}
     
-    # Parse the dimensions
+    # Try to parse as dimensions
     try:
-        if 'x' in size_str:
-            width, height = map(int, size_str.split('x'))
-            print(f"Parsed dimensions: {width}x{height}")  # Debug output
-            return {'width': width, 'height': height}
-        else:
-            raise ValueError(f"Invalid size format. Must be either WIDTHxHEIGHT or one of the named sizes: {', '.join(size_mapping.keys())}")
-    except ValueError as e:
-        print(f"Error parsing size: {str(e)}")  # Debug output
-        raise ValueError(f"Invalid size format. Must be either WIDTHxHEIGHT or one of the named sizes: {', '.join(size_mapping.keys())}")
+        width, height = map(int, size_str.split('x'))
+        if debug:
+            print(f"Parsed dimensions: {width}x{height}")
+        return {'width': width, 'height': height}
+    except ValueError:
+        raise ValueError(f"Invalid size format: {size_str}. Use WxH format (e.g., 1024x1024) or a named size.")
 
 def get_unique_filename(base_filename, overwrite=False):
     """

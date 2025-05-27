@@ -30,7 +30,9 @@ def create_parser():
                             help='Minimize output messages')
     image_parser.add_argument('-ow', '--overwrite', action='store_true',
                             help='Overwrite existing files instead of adding number suffix')
-    image_parser.add_argument('-sr', '--styleref', help='Path to a style reference image file. Can be a single file or variations in [file1,file2,...] format.')
+    image_parser.add_argument('-sref', '--style-reference', help='Path to a style reference image file. Can be a single file or variations in [file1,file2,...] format.')
+    image_parser.add_argument('-sref-strength', '--style-reference-strength', type=int, choices=range(1, 101),
+                            help='Strength of the style reference (1-100, default: 50)')
 
     # Text-to-speech command
     tts_parser = subparsers.add_parser('tts', help='Generate text-to-speech')

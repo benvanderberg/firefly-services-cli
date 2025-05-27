@@ -6,7 +6,7 @@ from itertools import product
 
 def generate_image(access_token, prompt, num_generations=1, model_version='image3', content_class='photo',
                   negative_prompt=None, prompt_biasing_locale=None, size=None, seeds=None, debug=False,
-                  visual_intensity=None, style_ref_path=None):
+                  visual_intensity=None, style_ref_path=None, style_ref_strength=50):
     """
     Generate images using Adobe Firefly Services API.
     
@@ -18,11 +18,12 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
         content_class (str): Content class for the image
         negative_prompt (str): Negative prompt to guide generation
         prompt_biasing_locale (str): Locale for prompt biasing
-        size (dict): Image size specification
+        size (dict): Image size specification with width and height
         seeds (list): List of seeds for generation
         debug (bool): Enable debug output
         visual_intensity (int): Visual intensity of the generated image (1-10)
         style_ref_path (str): Path to style reference image file
+        style_ref_strength (int): Strength of the style reference (1-100)
     
     Returns:
         dict: Job information including job ID and status
@@ -49,7 +50,14 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
         data["promptBiasingLocale"] = prompt_biasing_locale
     
     if size:
-        data["size"] = size
+        # Ensure size is properly formatted as an object with width and height
+        if isinstance(size, dict) and 'width' in size and 'height' in size:
+            data["size"] = {
+                "width": size['width'],
+                "height": size['height']
+            }
+        else:
+            raise ValueError("Size must be a dictionary with 'width' and 'height' keys")
     
     if seeds:
         data["seeds"] = seeds
@@ -70,7 +78,7 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
                         "url": style_ref_url
                     }
                 },
-                "strength": 100  # Full adherence to style
+                "strength": style_ref_strength
             }
         else:
             # Use local file path
@@ -80,22 +88,28 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
                         "url": f"file://{os.path.abspath(style_ref_path)}"
                     }
                 },
-                "strength": 100  # Full adherence to style
+                "strength": style_ref_strength
             }
     
     if debug:
         print("Request data:", json.dumps(data, indent=2))
     
-    response = requests.post(url, headers=headers, json=data)
-    response.raise_for_status()
-    return response.json()
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.HTTPError as e:
+        if debug:
+            print(f"Error response: {e.response.text}")
+        raise Exception(f"API request failed: {e.response.text}")
 
-def normalize_model_name(model_name):
+def normalize_model_name(model_name, debug=False):
     """
     Normalize model name to its full version.
     
     Args:
         model_name (str): The model name to normalize
+        debug (bool): Whether to show debug information
     
     Returns:
         str: The normalized model name
@@ -109,7 +123,8 @@ def normalize_model_name(model_name):
         'image3_custom': 'image3_custom'
     }
     normalized = model_mapping.get(model_name, model_name)
-    print(f"Normalized model name: {model_name} -> {normalized}")  # Debug output
+    if debug:
+        print(f"Normalized model name: {model_name} -> {normalized}")
     return normalized
 
 def format_model_name_for_display(model_name):
@@ -130,12 +145,13 @@ def format_model_name_for_display(model_name):
     }
     return model_display_names.get(model_name, model_name)
 
-def parse_model_variations(model_str):
+def parse_model_variations(model_str, debug=False):
     """
     Parse model string containing variations in [option1,option2,...] format.
     
     Args:
         model_str (str): The model string containing variations
+        debug (bool): Whether to show debug information
     
     Returns:
         list: List of model versions to use
@@ -148,10 +164,10 @@ def parse_model_variations(model_str):
             # Split the options and strip whitespace
             models = [m.strip() for m in match.group(1).split(',')]
             # Normalize each model name
-            return [normalize_model_name(m) for m in models]
+            return [normalize_model_name(m, debug) for m in models]
     
     # If no variations, return single model
-    return [normalize_model_name(model_str)]
+    return [normalize_model_name(model_str, debug)]
 
 def parse_style_ref_variations(style_ref_str):
     """
