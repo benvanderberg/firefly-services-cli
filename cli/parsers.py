@@ -9,13 +9,13 @@ def create_parser():
     subparsers = parser.add_subparsers(dest='command', help='Command to execute')
 
     # Image generation command
-    image_parser = subparsers.add_parser('image', help='Generate images')
+    image_parser = subparsers.add_parser('image', aliases=['img'], help='Generate images')
     image_parser.add_argument('-prompt', '--prompt', required=True, help='Text prompt for image generation. Use [option1,option2,...] for variations')
     image_parser.add_argument('-o', '--output', required=True, help='Output file path for the generated image. Supports tokens: {prompt}, {date}, {time}, {datetime}, {seed}, {sr}, {model}, {width}, {height}, {dimensions}, {var1}, {var2}, {n}, etc.')
     image_parser.add_argument('-n', '--numVariations', type=int, default=1, choices=range(1, 5),
                             help='Number of variations to generate (1-4, default: 1)')
     image_parser.add_argument('-m', '--model', default='image3',
-                            help='Firefly model version to use. Can be a single model or variations in [model1,model2,...] format. Choices: image3, image3_custom, image4, image4_standard, image4_ultra, ultra')
+                            help='Firefly model version to use. Can be a single model or variations in [model1,model2,...] format. Choices: image3, image4, image4_standard, image4_ultra, ultra')
     image_parser.add_argument('-c', '--content-class', choices=['photo', 'art'], default='photo',
                             help='Type of content to generate (default: photo)')
     image_parser.add_argument('-np', '--negative-prompt', help='Text describing what to avoid in the generation')
@@ -36,7 +36,7 @@ def create_parser():
     image_parser.add_argument('-cref-strength', '--composition-reference-strength', type=int, default=50, choices=range(1, 101), metavar='[1-100]', help='Strength of the composition reference (1-100, default: 50)')
 
     # Text-to-speech command
-    tts_parser = subparsers.add_parser('tts', help='Generate text-to-speech')
+    tts_parser = subparsers.add_parser('tts', aliases=['speech'], help='Generate text-to-speech')
     tts_parser.add_argument('-t', '--text', help='Text to convert to speech')
     tts_parser.add_argument('-f', '--file', help='Path to text file to convert to speech')
     tts_parser.add_argument('-o', '--output', required=True, help='Output file path for the generated audio')
@@ -60,10 +60,10 @@ def create_parser():
                           help='Minimize output messages')
 
     # List voices command
-    voices_parser = subparsers.add_parser('voices', help='List available voices')
+    voices_parser = subparsers.add_parser('voices', aliases=['v'], help='List available voices')
 
     # Transcription command
-    transcribe_parser = subparsers.add_parser('transcribe', help='Transcribe audio or video content')
+    transcribe_parser = subparsers.add_parser('transcribe', aliases=['trans'], help='Transcribe audio or video content')
     transcribe_parser.add_argument('-i', '--input', required=True, help='Path to the media file to transcribe')
     transcribe_parser.add_argument('-o', '--output', required=True, help='Output file path for the transcription')
     transcribe_parser.add_argument('-t', '--type', choices=['audio', 'video'], required=True,

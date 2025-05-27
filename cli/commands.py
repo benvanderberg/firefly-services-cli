@@ -1,28 +1,48 @@
 import os
 import sys
+import json
 import time
 import requests
-from datetime import datetime, timedelta, UTC
-from tabulate import tabulate
-from dotenv import load_dotenv
-from utils.rate_limiter import RateLimiter
 import concurrent.futures
+from datetime import datetime
+from tabulate import tabulate
+from typing import List, Dict, Any, Optional, Union
+from dotenv import load_dotenv
 
 from utils.auth import retrieve_access_token
-from services.image import generate_image, parse_model_variations, parse_style_ref_variations
+from utils.storage import upload_to_azure_storage
+from utils.rate_limiter import RateLimiter
 from utils.filename import parse_size, parse_prompt_variations, get_variation_filename, get_unique_filename, replace_filename_tokens
+from services.image import generate_image, parse_model_variations, parse_style_ref_variations
 from services.speech import generate_speech, get_available_voices
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
-from utils.storage import upload_to_azure_storage
+from config.settings import (
+    IMAGE_GENERATION_API_URL,
+    SPEECH_API_URL,
+    DUBBING_API_URL,
+    TRANSCRIPTION_API_URL,
+    VOICES_API_URL,
+    MODEL_VERSIONS,
+    CONTENT_CLASSES,
+    RATE_LIMIT_REQUESTS,
+    RATE_LIMIT_PERIOD
+)
+
+# Load environment variables
+load_dotenv()
 
 def handle_command(args):
     """
     Handle the command based on the parsed arguments.
+    
+    Args:
+        args: Parsed command line arguments
     """
-    # Get authentication token
-    access_token = retrieve_access_token(args.silent)
-
+    # Get access token
+    access_token = retrieve_access_token()
+    
+    # Handle different commands
     if args.command == 'image':
         handle_image_command(args, access_token)
     elif args.command == 'tts':
@@ -34,7 +54,7 @@ def handle_command(args):
     elif args.command == 'transcribe':
         handle_transcribe_command(args, access_token)
     else:
-        print("Error: Unknown command")
+        print(f"Unknown command: {args.command}")
         sys.exit(1)
 
 def handle_image_command(args, access_token):

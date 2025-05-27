@@ -1,30 +1,41 @@
+import os
+
 # API Endpoints
-TOKEN_URL = "https://ims-na1.adobe.io/ims/token/v3"
-IMAGE_API_URL = "https://image-api.adobe.io/v1/generate"
-SPEECH_API_URL = "https://audio-video-api.adobe.io/v1/tts"
-DUB_API_URL = "https://audio-video-api.adobe.io/v1/dub"
-VOICES_API_URL = "https://audio-video-api.adobe.io/v1/voices"
-TRANSCRIBE_API_URL = "https://audio-video-api.adobe.io/v1/transcribe"
+IMAGE_GENERATION_API_URL = "https://firefly-api.adobe.io/v3/images/generate"
+SPEECH_API_URL = "https://firefly-api.adobe.io/v3/speech/generate"
+DUBBING_API_URL = "https://firefly-api.adobe.io/v3/dubbing"
+TRANSCRIPTION_API_URL = "https://firefly-api.adobe.io/v3/transcription"
+VOICES_API_URL = "https://firefly-api.adobe.io/v3/voices"
+
+# Model Versions
+MODEL_VERSIONS = {
+    'image3': 'image3',
+    'image4': 'image4',
+    'image4_standard': 'image4_standard',
+    'image4_ultra': 'image4_ultra',
+    'ultra': 'ultra'
+}
+
+# Content Classes
+CONTENT_CLASSES = ['photo', 'art']
+
+# Rate Limiting
+RATE_LIMIT_REQUESTS = 10  # Number of requests
+RATE_LIMIT_PERIOD = 60    # Time period in seconds
+
+# Azure Storage Settings
+AZURE_STORAGE_CONNECTION_STRING = os.getenv('AZURE_STORAGE_CONNECTION_STRING')
+AZURE_STORAGE_CONTAINER = os.getenv('AZURE_STORAGE_CONTAINER')
+AZURE_STORAGE_ACCOUNT = os.getenv('AZURE_STORAGE_ACCOUNT')
+AZURE_STORAGE_KEY = os.getenv('AZURE_STORAGE_KEY')
+AZURE_STORAGE_SAS_TOKEN = os.getenv('AZURE_STORAGE_SAS_TOKEN')
+AZURE_STORAGE_BLOB_URL = os.getenv('AZURE_STORAGE_BLOB_URL')
 
 # Default settings
 DEFAULT_MODEL_VERSION = "image3"
 DEFAULT_CONTENT_CLASS = "photo"
 DEFAULT_LOCALE = "en-US"
 DEFAULT_OUTPUT_FORMAT = "mp4"
-
-# Model versions
-MODEL_VERSIONS = {
-    "image3": "image3",
-    "image4_standard": "image4_standard",
-    "image4_ultra": "image4_ultra"
-}
-
-# Content classes
-CONTENT_CLASSES = {
-    "photo": "photo",
-    "art": "art",
-    "product": "product"
-}
 
 # Output formats
 OUTPUT_FORMATS = {
