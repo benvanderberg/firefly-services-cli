@@ -256,4 +256,74 @@ def generate_similar_image(
         print("\nResponse Body:", json.dumps(response.json(), indent=2))
     
     response.raise_for_status()
+    return response.json()
+
+def expand_image(
+    access_token: str,
+    image_path: str,
+    prompt: str,
+    mask_path: Optional[str] = None,
+    mask_invert: Optional[bool] = None,
+    num_variations: int = 1,
+    align_h: Optional[str] = None,
+    align_v: Optional[str] = None,
+    left: Optional[int] = None,
+    right: Optional[int] = None,
+    top: Optional[int] = None,
+    bottom: Optional[int] = None,
+    height: Optional[int] = None,
+    width: Optional[int] = None,
+    seeds: Optional[List[int]] = None,
+    debug: bool = False
+) -> dict:
+    image_url = upload_to_azure_storage(image_path)
+    mask_url = upload_to_azure_storage(mask_path) if mask_path else None
+
+    payload = {
+        "image": {"source": {"url": image_url}},
+        "numVariations": num_variations,
+        "prompt": prompt
+    }
+
+    # Only add placement if any alignment or inset parameters are set
+    if any(param is not None for param in [align_h, align_v, left, right, top, bottom]):
+        placement = {}
+        if align_h is not None or align_v is not None:
+            placement["alignment"] = {}
+            if align_h is not None:
+                placement["alignment"]["horizontal"] = align_h
+            if align_v is not None:
+                placement["alignment"]["vertical"] = align_v
+        if any(param is not None for param in [left, right, top, bottom]):
+            placement["inset"] = {}
+            if left is not None:
+                placement["inset"]["left"] = left
+            if right is not None:
+                placement["inset"]["right"] = right
+            if top is not None:
+                placement["inset"]["top"] = top
+            if bottom is not None:
+                placement["inset"]["bottom"] = bottom
+        payload["placement"] = placement
+
+    if mask_url:
+        payload["mask"] = {
+            "invert": mask_invert,
+            "source": {"url": mask_url}
+        }
+    if height and width:
+        payload["size"] = {"height": height, "width": width}
+    if seeds:
+        payload["seeds"] = seeds
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "x-api-key": os.environ['FIREFLY_SERVICES_CLIENT_ID'],
+        "Content-Type": "application/json"
+    }
+    url = "https://firefly-api.adobe.io/v3/images/expand-async"
+    if debug:
+        print("Expand payload:", json.dumps(payload, indent=2))
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
     return response.json() 

@@ -13,7 +13,7 @@ from utils.auth import retrieve_access_token
 from utils.storage import upload_to_azure_storage
 from utils.rate_limiter import RateLimiter
 from utils.filename import parse_size, parse_prompt_variations, get_variation_filename, get_unique_filename, replace_filename_tokens
-from services.image import generate_image, parse_model_variations, parse_style_ref_variations, generate_similar_image
+from services.image import generate_image, parse_model_variations, parse_style_ref_variations, generate_similar_image, expand_image
 from services.speech import generate_speech, get_available_voices
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
@@ -55,6 +55,8 @@ def handle_command(args):
         handle_voices_command(args, access_token)
     elif args.command in ['transcribe', 'trans']:
         handle_transcribe_command(args, access_token)
+    elif args.command == 'expand':
+        handle_expand_command(args, access_token)
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
@@ -442,6 +444,53 @@ def handle_transcribe_command(args, access_token):
         if args.debug:
             print("Response:", result)
         sys.exit(1)
+
+def handle_expand_command(args, access_token):
+    # Validate numVariations
+    if not 1 <= args.numVariations <= 4:
+        print("Error: Number of variations (-n) must be between 1 and 4")
+        sys.exit(1)
+    # Validate mask-invert
+    if args.mask_invert and not args.mask:
+        print("Error: --mask-invert can only be used if --mask is set")
+        sys.exit(1)
+
+    # Create output directory if it doesn't exist
+    output_dir = os.path.dirname(args.output)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Call expand_image
+    job_info = expand_image(
+        access_token=access_token,
+        image_path=args.input,
+        prompt=args.prompt,
+        mask_path=args.mask,
+        mask_invert=args.mask_invert if args.mask else None,
+        num_variations=args.numVariations,
+        align_h=args.align_h,
+        align_v=args.align_v,
+        left=args.left,
+        right=args.right,
+        top=args.top,
+        bottom=args.bottom,
+        height=args.height,
+        width=args.width,
+        seeds=args.seeds,
+        debug=args.debug
+    )
+    print(f"Job ID: {job_info['jobId']}")
+    print("Polling for job completion...")
+    result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
+    if 'result' in result and 'outputs' in result['result']:
+        outputs = result['result']['outputs']
+        for idx, output in enumerate(outputs, 1):
+            image_url = output['image']['url']
+            output_filename = args.output.replace("{n}", str(idx))
+            print(f"Downloading expanded image to {output_filename}...")
+            download_file(image_url, output_filename, args.silent, args.debug)
+    else:
+        print("No outputs found in response.")
 
 def check_job_status(status_url, access_token, silent=False, debug=False):
     """

@@ -52,6 +52,27 @@ def create_parser():
     similar_parser.add_argument('-ow', '--overwrite', action='store_true',
                             help='Overwrite existing files instead of adding number suffix')
 
+    # Expand image command
+    expand_parser = subparsers.add_parser('expand', help='Generative Expand (outpaint) an image')
+    expand_parser.add_argument('-i', '--input', required=True, help='Path to the input image file')
+    expand_parser.add_argument('-o', '--output', required=True, help='Output file path for the expanded image')
+    expand_parser.add_argument('-p', '--prompt', help='Prompt for the expansion')
+    expand_parser.add_argument('--mask', help='Path to the mask image file (optional)')
+    expand_parser.add_argument('--mask-invert', action='store_true', help='Invert the mask (only if --mask is set)')
+    expand_parser.add_argument('-n', '--numVariations', type=int, default=1, choices=range(1, 5), help='Number of variations (1-4, default: 1)')
+    expand_parser.add_argument('--align-h', choices=['center', 'left', 'right'], default='center', help='Horizontal alignment (default: center)')
+    expand_parser.add_argument('--align-v', choices=['center', 'top', 'bottom'], default='center', help='Vertical alignment (default: center)')
+    expand_parser.add_argument('--left', type=int, default=0, help='Inset left')
+    expand_parser.add_argument('--right', type=int, default=0, help='Inset right')
+    expand_parser.add_argument('--top', type=int, default=0, help='Inset top')
+    expand_parser.add_argument('--bottom', type=int, default=0, help='Inset bottom')
+    expand_parser.add_argument('--height', type=int, help='Output height in pixels')
+    expand_parser.add_argument('--width', type=int, help='Output width in pixels')
+    expand_parser.add_argument('--seeds', type=int, nargs='+', help='Seed values for consistent generation (1-4 values)')
+    expand_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information')
+    expand_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
+    expand_parser.add_argument('-ow', '--overwrite', action='store_true', help='Overwrite existing files')
+
     # Text-to-speech command
     tts_parser = subparsers.add_parser('tts', aliases=['speech'], help='Generate text-to-speech')
     tts_parser.add_argument('-t', '--text', help='Text to convert to speech')
