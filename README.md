@@ -53,6 +53,12 @@ Options:
 - `-vi, --visual-intensity`: Visual intensity of the generated image (1-10)
 - `-d, --debug`: Show debug information including full HTTP request details
 - `-silent, --silent`: Minimize output messages (only shows final result)
+- `-ow, --overwrite`: Overwrite existing files instead of adding number suffix
+
+File Handling:
+- If the output file already exists and `-ow` is not used, a number suffix will be added (e.g., `output_1.jpg`, `output_2.jpg`, etc.)
+- If `-ow` is used, the existing file will be overwritten
+- When generating multiple images (`-n > 1`), files are always numbered sequentially
 
 Examples:
 ```bash
@@ -70,6 +76,9 @@ python ff.py image -prompt "a mountain landscape" -o mountain.jpg -s landscape -
 
 # Generate image with minimal output
 python ff.py image -prompt "a cute dog" -o dog.jpg -silent
+
+# Generate image and overwrite if exists
+python ff.py image -prompt "a cute dog" -o dog.jpg -ow
 ```
 
 The command will display the model name in a user-friendly format:

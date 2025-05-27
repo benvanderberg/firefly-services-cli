@@ -605,6 +605,31 @@ def format_model_name_for_display(model_name):
     }
     return model_display_names.get(model_name, model_name)
 
+def get_unique_filename(base_filename, overwrite=False):
+    """
+    Generate a unique filename, either by overwriting or adding a number suffix.
+    
+    Args:
+        base_filename (str): The original filename
+        overwrite (bool): Whether to overwrite existing files
+    
+    Returns:
+        str: The unique filename
+    """
+    if overwrite or not os.path.exists(base_filename):
+        return base_filename
+    
+    # Split the filename into name and extension
+    name, ext = os.path.splitext(base_filename)
+    counter = 1
+    
+    # Keep trying new filenames until we find one that doesn't exist
+    while True:
+        new_filename = f"{name}_{counter}{ext}"
+        if not os.path.exists(new_filename):
+            return new_filename
+        counter += 1
+
 def main():
     """
     Main function that handles command line arguments and orchestrates the process.
@@ -632,6 +657,8 @@ def main():
                             help='Visual intensity of the generated image (1-10)')
     image_parser.add_argument('-silent', '--silent', action='store_true',
                             help='Minimize output messages')
+    image_parser.add_argument('-ow', '--overwrite', action='store_true',
+                            help='Overwrite existing files instead of adding number suffix')
 
     # Text-to-speech command
     tts_parser = subparsers.add_parser('tts', help='Generate speech from text')
@@ -728,12 +755,21 @@ def main():
                 # Download each output
                 for i, output in enumerate(outputs):
                     image_url = output['image']['url']
-                    output_filename = get_output_filename(args.output, i, total_outputs)
+                    if total_outputs == 1:
+                        output_filename = get_unique_filename(args.output, args.overwrite)
+                    else:
+                        # For multiple outputs, we'll always add a number suffix
+                        name, ext = os.path.splitext(args.output)
+                        output_filename = f"{name}_{i + 1}{ext}"
+                    
                     if args.debug:
                         print(f"Downloading image {i + 1} of {total_outputs} to {output_filename}...")
                     download_file(image_url, output_filename, args.silent, args.debug)
                 
-                print(f"Saved to {args.output}")
+                if total_outputs == 1:
+                    print(f"Saved to {output_filename}")
+                else:
+                    print(f"Saved {total_outputs} images")
 
         elif args.command == 'tts':
             # Get text from either direct input or file
