@@ -787,6 +787,29 @@ def get_variation_filename(base_filename, prompt, original_prompt, tokens=None):
     
     return f"{name}_{variation_suffix}{ext}"
 
+def parse_style_ref_variations(style_ref_str):
+    """
+    Parse style reference string containing variations in [option1,option2,...] format.
+    
+    Args:
+        style_ref_str (str): The style reference string containing variations
+    
+    Returns:
+        list: List of style reference files to use
+    """
+    import re
+    
+    # Check if the string contains variations
+    if '[' in style_ref_str and ']' in style_ref_str:
+        # Extract the variations
+        match = re.search(r'\[(.*?)\]', style_ref_str)
+        if match:
+            # Split the options and strip whitespace
+            return [s.strip() for s in match.group(1).split(',')]
+    
+    # If no variations, return single style reference
+    return [style_ref_str] if style_ref_str else []
+
 def main():
     """
     Main function that handles command line arguments and orchestrates the process.
@@ -816,45 +839,7 @@ def main():
                             help='Minimize output messages')
     image_parser.add_argument('-ow', '--overwrite', action='store_true',
                             help='Overwrite existing files instead of adding number suffix')
-    image_parser.add_argument('-sr', '--styleref', help='Path to a style reference image file')
-
-    # Text-to-speech command
-    tts_parser = subparsers.add_parser('tts', help='Generate speech from text')
-    tts_group = tts_parser.add_mutually_exclusive_group(required=True)
-    tts_group.add_argument('-t', '--text', help='Text to convert to speech')
-    tts_group.add_argument('-f', '--file', help='Path to text file containing the content to convert to speech')
-    tts_parser.add_argument('-v', '--voice', required=True, help='Voice ID to use')
-    tts_parser.add_argument('-o', '--output', required=True, help='Output file path (will be saved as WAV)')
-    tts_parser.add_argument('-l', '--locale', default='en-US',
-                          help='Locale code for the text (default: en-US)')
-    tts_parser.add_argument('-d', '--debug', action='store_true',
-                          help='Show debug information')
-
-    # Dubbing command
-    dub_parser = subparsers.add_parser('dub', help='Dub audio or video content')
-    dub_parser.add_argument('-i', '--input', required=True, help='URL of the source media file')
-    dub_parser.add_argument('-l', '--locale', required=True, help='Target language locale code (e.g., fr-FR)')
-    dub_parser.add_argument('-o', '--output', required=True, help='Output file path')
-    dub_parser.add_argument('-f', '--format', choices=['mp4', 'mp3'], default='mp4',
-                          help='Output format (default: mp4)')
-
-    # List voices command
-    voices_parser = subparsers.add_parser('voices', help='List available voices')
-
-    # Transcription command
-    transcribe_parser = subparsers.add_parser('transcribe', help='Transcribe audio or video content')
-    transcribe_parser.add_argument('-i', '--input', required=True, help='Path to the media file to transcribe')
-    transcribe_parser.add_argument('-t', '--type', choices=['audio', 'video'], required=True,
-                                 help='Type of media (audio or video)')
-    transcribe_parser.add_argument('-l', '--locale', default='en-US',
-                                 help='Target language locale code (default: en-US)')
-    transcribe_parser.add_argument('-c', '--captions', action='store_true',
-                                 help='Generate SRT captions')
-    transcribe_parser.add_argument('-d', '--debug', action='store_true',
-                                 help='Show debug information')
-    transcribe_parser.add_argument('-o', '--output', required=True, help='Path to save the transcription output')
-    transcribe_parser.add_argument('-text', '--text-only', action='store_true',
-                                 help='Extract and save only the transcript text')
+    image_parser.add_argument('-sr', '--styleref', help='Path to a style reference image file. Can be a single file or variations in [file1,file2,...] format.')
 
     args = parser.parse_args()
 
@@ -880,8 +865,12 @@ def main():
             prompts, variation_blocks = parse_prompt_variations(args.prompt)
             total_variations = len(prompts)
 
+            # Parse style reference variations
+            style_refs = parse_style_ref_variations(args.styleref) if args.styleref else [None]
+            total_style_refs = len(style_refs)
+
             if not args.silent:
-                print(f'Generating {total_variations} variation(s) with {total_models} model(s)...')
+                print(f'Generating {total_variations} variation(s) with {total_models} model(s) and {total_style_refs} style reference(s)...')
 
             # Process each model version
             for model_version in model_versions:
@@ -889,79 +878,84 @@ def main():
                     display_model = format_model_name_for_display(model_version)
                     print(f"\nUsing Firefly {display_model}")
 
-                # Process each prompt variation
-                for i, prompt in enumerate(prompts, 1):
-                    if not args.silent:
-                        print(f"\nVariation {i}/{total_variations}: {prompt}")
+                # Process each style reference
+                for style_ref in style_refs:
+                    if style_ref and not args.silent:
+                        print(f"\nUsing style reference: {style_ref}")
 
-                    # Submit the image generation job
-                    job_info = generate_image(
-                        access_token=access_token,
-                        prompt=prompt,
-                        num_generations=args.number,
-                        model_version=model_version,
-                        content_class=args.content_class,
-                        negative_prompt=args.negative_prompt,
-                        prompt_biasing_locale=args.locale,
-                        size=size,
-                        seeds=args.seeds,
-                        debug=args.debug,
-                        visual_intensity=args.visual_intensity,
-                        style_ref_path=args.styleref
-                    )
-                    
-                    if args.debug:
-                        print(f"Job ID: {job_info['jobId']}")
-                        print(f"Requested {args.number} image(s)")
-                        print("Polling for job completion...")
-                    
-                    # Poll the status URL until the job is complete
-                    result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
-                    
-                    # Extract and download the generated images
-                    if 'result' in result and 'outputs' in result['result']:
-                        outputs = result['result']['outputs']
-                        total_outputs = len(outputs)
+                    # Process each prompt variation
+                    for i, prompt in enumerate(prompts, 1):
+                        if not args.silent:
+                            print(f"\nVariation {i}/{total_variations}: {prompt}")
+
+                        # Submit the image generation job
+                        job_info = generate_image(
+                            access_token=access_token,
+                            prompt=prompt,
+                            num_generations=args.number,
+                            model_version=model_version,
+                            content_class=args.content_class,
+                            negative_prompt=args.negative_prompt,
+                            prompt_biasing_locale=args.locale,
+                            size=size,
+                            seeds=args.seeds,
+                            debug=args.debug,
+                            visual_intensity=args.visual_intensity,
+                            style_ref_path=style_ref
+                        )
                         
                         if args.debug:
-                            print(f"\nFound {total_outputs} generated image(s)")
+                            print(f"Job ID: {job_info['jobId']}")
+                            print(f"Requested {args.number} image(s)")
+                            print("Polling for job completion...")
                         
-                        # Prepare tokens for filename
-                        tokens = {
-                            'prompt': prompt,
-                            'model': model_version,
-                            'size': size,
-                            'seeds': args.seeds,
-                            'style_ref': args.styleref
-                        }
+                        # Poll the status URL until the job is complete
+                        result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
                         
-                        # Download each output
-                        for j, output in enumerate(outputs):
-                            image_url = output['image']['url']
-                            if total_outputs == 1:
-                                # For single output, use variation in filename
-                                base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens)
-                                output_filename = get_unique_filename(base_filename, args.overwrite)
-                            else:
-                                # For multiple outputs, combine variation and output number
-                                base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens)
-                                name, ext = os.path.splitext(base_filename)
-                                output_filename = f"{name}_{j + 1}{ext}"
+                        # Extract and download the generated images
+                        if 'result' in result and 'outputs' in result['result']:
+                            outputs = result['result']['outputs']
+                            total_outputs = len(outputs)
                             
                             if args.debug:
-                                print(f"Downloading image {j + 1} of {total_outputs} to {output_filename}...")
-                            download_file(image_url, output_filename, args.silent, args.debug)
-                        
-                        if total_outputs == 1:
-                            print(f"Saved to {output_filename}")
-                        else:
-                            print(f"Saved {total_outputs} images for variation {i}")
+                                print(f"\nFound {total_outputs} generated image(s)")
+                            
+                            # Prepare tokens for filename
+                            tokens = {
+                                'prompt': prompt,
+                                'model': model_version,
+                                'size': size,
+                                'seeds': args.seeds,
+                                'style_ref': style_ref
+                            }
+                            
+                            # Download each output
+                            for j, output in enumerate(outputs):
+                                image_url = output['image']['url']
+                                if total_outputs == 1:
+                                    # For single output, use variation in filename
+                                    base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens)
+                                    output_filename = get_unique_filename(base_filename, args.overwrite)
+                                else:
+                                    # For multiple outputs, combine variation and output number
+                                    base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens)
+                                    name, ext = os.path.splitext(base_filename)
+                                    output_filename = f"{name}_{j + 1}{ext}"
+                                
+                                if args.debug:
+                                    print(f"Downloading image {j + 1} of {total_outputs} to {output_filename}...")
+                                download_file(image_url, output_filename, args.silent, args.debug)
+                            
+                            if total_outputs == 1:
+                                print(f"Saved to {output_filename}")
+                            else:
+                                print(f"Saved {total_outputs} images for variation {i}")
 
-                if not args.silent:
-                    print(f"\nCompleted {total_variations} variation(s) with {display_model}")
+                    if not args.silent:
+                        print(f"\nCompleted {total_variations} variation(s) with {display_model}" + (f" and style reference {style_ref}" if style_ref else ""))
 
             if not args.silent:
-                print(f"\nCompleted all {total_models} model(s)")
+                print(f"\nCompleted all {total_models} model(s) and {total_style_refs} style reference(s)")
 
         elif args.command == 'tts':
             # Get text from either direct input or file
