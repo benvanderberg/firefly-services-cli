@@ -94,7 +94,7 @@ def parse_size(size_str, model_version, debug=False):
     except ValueError:
         raise ValueError(f"Invalid size format: {size_str}. Use WxH format (e.g., 1024x1024) or a named size.")
 
-def get_unique_filename(base_filename, overwrite=False):
+def get_unique_filename(base_filename, overwrite=False, debug=False):
     """
     Generate a unique filename, either by overwriting or adding a number suffix.
     Creates any necessary directories in the path.
@@ -102,6 +102,7 @@ def get_unique_filename(base_filename, overwrite=False):
     Args:
         base_filename (str): The original filename
         overwrite (bool): Whether to overwrite existing files
+        debug (bool): Whether to show debug information
     
     Returns:
         str: The unique filename
@@ -109,12 +110,14 @@ def get_unique_filename(base_filename, overwrite=False):
     # Create directory if it doesn't exist
     directory = os.path.dirname(base_filename)
     if directory:
-        print(f"Creating directory: {directory}")  # Debug output
+        if debug:
+            print(f"Creating directory: {directory}")
         try:
             os.makedirs(directory, exist_ok=True)
-            print(f"Directory created or already exists: {directory}")  # Debug output
+            if debug:
+                print(f"Directory created or already exists: {directory}")
         except Exception as e:
-            print(f"Error creating directory {directory}: {str(e)}")  # Debug output
+            print(f"Error creating directory {directory}: {str(e)}")
             raise
     
     if overwrite or not os.path.exists(base_filename):
@@ -163,19 +166,21 @@ def parse_prompt_variations(prompt):
     
     return prompts, variation_blocks
 
-def replace_filename_tokens(filename, tokens):
+def replace_filename_tokens(filename, tokens, debug=False):
     """
     Replace tokens in the filename with their corresponding values.
     
     Args:
         filename (str): The filename containing tokens
         tokens (dict): Dictionary of token values to replace
+        debug (bool): Whether to show debug information
     
     Returns:
         str: Filename with tokens replaced
     """
-    print(f"Replacing tokens in filename: {filename}")  # Debug output
-    print(f"Available tokens: {tokens}")  # Debug output
+    if debug:
+        print(f"Replacing tokens in filename: {filename}")
+        print(f"Available tokens: {tokens}")
     
     # Define token patterns and their replacements
     token_patterns = {
@@ -201,13 +206,15 @@ def replace_filename_tokens(filename, tokens):
     for pattern, replacement_func in token_patterns.items():
         if pattern in result:
             replacement = replacement_func(tokens)
-            print(f"Replacing {pattern} with {replacement}")  # Debug output
+            if debug:
+                print(f"Replacing {pattern} with {replacement}")
             result = result.replace(pattern, replacement)
     
-    print(f"Final filename: {result}")  # Debug output
+    if debug:
+        print(f"Final filename: {result}")
     return result
 
-def get_variation_filename(base_filename, prompt, original_prompt, tokens=None):
+def get_variation_filename(base_filename, prompt, original_prompt, tokens=None, debug=False):
     """
     Generate a filename with variation values appended.
     
@@ -216,6 +223,7 @@ def get_variation_filename(base_filename, prompt, original_prompt, tokens=None):
         prompt (str): The current prompt with variations replaced
         original_prompt (str): The original prompt with variation blocks
         tokens (dict): Additional tokens for filename replacement
+        debug (bool): Whether to show debug information
     
     Returns:
         str: The filename with variation values appended
@@ -243,7 +251,7 @@ def get_variation_filename(base_filename, prompt, original_prompt, tokens=None):
         # Add variations to tokens
         tokens['variations'] = variation_values
         # Replace tokens in the name
-        name = replace_filename_tokens(name, tokens)
+        name = replace_filename_tokens(name, tokens, debug)
         
         # If model token is not in the filename, append it
         if '{model}' not in base_filename and tokens.get('model'):

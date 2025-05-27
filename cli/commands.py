@@ -60,17 +60,27 @@ def handle_image_command(args, access_token):
     style_refs = parse_style_ref_variations(args.style_reference) if args.style_reference else [None]
     total_style_refs = len(style_refs)
 
+    # Parse composition reference variations
+    composition_refs = parse_style_ref_variations(args.composition_reference) if args.composition_reference else [None]
+    total_composition_refs = len(composition_refs)
+
+    # Calculate total number of generations
+    total_generations = total_variations * total_models * total_style_refs * total_composition_refs * args.numVariations
+
     # Get throttle limit from environment
     throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
     rate_limiter = RateLimiter(throttle_limit, 60)
 
     if not args.silent:
-        print(f'Generating {total_variations} variation(s) with {total_models} model(s) and {total_style_refs} style reference(s)...')
-        if args.numVariations > 1:
-            print(f'Each variation will generate {args.numVariations} images')
-        print(f'Using parallel processing with rate limit of {throttle_limit} calls per minute')
+        print(f'Generating {total_generations} total variations:')
+        print(f'  • {total_variations} prompt variations')
+        print(f'  • {total_models} model versions')
+        print(f'  • {total_style_refs} style references')
+        print(f'  • {total_composition_refs} composition references')
+        print(f'  • {args.numVariations} variations per combination')
+        print(f'Using parallel processing with rate limit of {throttle_limit} calls per minute\n')
 
-    def image_task(prompt, model_version, style_ref, j):
+    def image_task(prompt, model_version, style_ref, composition_ref, j):
         rate_limiter.acquire()
         tokens = {
             'prompt': prompt,
@@ -78,10 +88,11 @@ def handle_image_command(args, access_token):
             'size': size,
             'seeds': args.seeds,
             'style_ref': style_ref,
+            'composition_ref': composition_ref,
             'iteration': j + 1
         }
-        base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens)
-        output_filename = get_unique_filename(base_filename, args.overwrite)
+        base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens, args.debug)
+        output_filename = get_unique_filename(base_filename, args.overwrite, args.debug)
         try:
             job_info = generate_image(
                 access_token=access_token,
@@ -96,7 +107,9 @@ def handle_image_command(args, access_token):
                 debug=args.debug,
                 visual_intensity=args.visual_intensity,
                 style_ref_path=style_ref,
-                style_ref_strength=args.style_reference_strength
+                style_ref_strength=args.style_reference_strength,
+                composition_ref_path=composition_ref,
+                composition_ref_strength=args.composition_reference_strength
             )
             if args.debug:
                 print(f"Job ID: {job_info['jobId']}")
@@ -118,23 +131,31 @@ def handle_image_command(args, access_token):
                 traceback.print_exc()
             return False
 
+    # Create a list to store all generation tasks
+    generation_tasks = []
+    current_generation = 0
+
+    # Prepare the table header
+    if not args.silent:
+        print("Generation Tasks:")
+        print(f"{'#':<4} {'Model':<15} {'Prompt':<40} {'SRef':<20} {'SRef-Strength':<15} {'CRef':<20} {'CRef-Strength':<15}")
+        print("-" * 120)
+
     tasks = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=throttle_limit) as executor:
         for model_version in model_versions:
-            if not args.silent:
-                print(f"\nUsing Firefly {model_version}")
             for style_ref in style_refs:
-                if style_ref and not args.silent:
-                    print(f"\nUsing style reference: {style_ref}")
-                for i, prompt in enumerate(prompts, 1):
-                    if not args.silent:
-                        print(f"\nVariation {i}/{total_variations}: {prompt}")
-                    for j in range(args.numVariations):
-                        tasks.append(executor.submit(image_task, prompt, model_version, style_ref, j))
+                for composition_ref in composition_refs:
+                    for i, prompt in enumerate(prompts, 1):
+                        for j in range(args.numVariations):
+                            current_generation += 1
+                            if not args.silent:
+                                print(f"{current_generation:<4} {model_version:<15} {prompt[:40]:<40} {os.path.basename(style_ref) if style_ref else 'None':<20} {args.style_reference_strength:<15} {os.path.basename(composition_ref) if composition_ref else 'None':<20} {args.composition_reference_strength:<15}")
+                            tasks.append(executor.submit(image_task, prompt, model_version, style_ref, composition_ref, j))
         for future in concurrent.futures.as_completed(tasks):
             future.result()
     if not args.silent:
-        print("All image generation tasks completed.")
+        print("\nAll image generation tasks completed.")
 
 def handle_tts_command(args, access_token):
     """Handle the text-to-speech command."""

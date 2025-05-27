@@ -3,10 +3,12 @@ import re
 import json
 import requests
 from itertools import product
+from utils.storage import upload_to_azure_storage
 
 def generate_image(access_token, prompt, num_generations=1, model_version='image3', content_class='photo',
                   negative_prompt=None, prompt_biasing_locale=None, size=None, seeds=None, debug=False,
-                  visual_intensity=None, style_ref_path=None, style_ref_strength=50):
+                  visual_intensity=None, style_ref_path=None, style_ref_strength=50,
+                  composition_ref_path=None, composition_ref_strength=50):
     """
     Generate images using Adobe Firefly Services API.
     
@@ -24,6 +26,8 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
         visual_intensity (int): Visual intensity of the generated image (1-10)
         style_ref_path (str): Path to style reference image file
         style_ref_strength (int): Strength of the style reference (1-100)
+        composition_ref_path (str): Path to composition reference image file
+        composition_ref_strength (int): Strength of the composition reference (1-100)
     
     Returns:
         dict: Job information including job ID and status
@@ -50,46 +54,41 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
         data["promptBiasingLocale"] = prompt_biasing_locale
     
     if size:
-        # Ensure size is properly formatted as an object with width and height
-        if isinstance(size, dict) and 'width' in size and 'height' in size:
-            data["size"] = {
-                "width": size['width'],
-                "height": size['height']
-            }
-        else:
-            raise ValueError("Size must be a dictionary with 'width' and 'height' keys")
+        if not (isinstance(size, dict) and 'width' in size and 'height' in size):
+            raise ValueError("Size must be a dict with 'width' and 'height' keys.")
+        data["size"] = size
     
     if seeds:
         data["seeds"] = seeds
-        
-    if visual_intensity is not None:
-        # Convert 1-10 scale to 0.0-1.0 scale
-        data["intensity"] = visual_intensity / 10.0
-
-    # Handle style reference if provided
+    
+    if visual_intensity:
+        data["visualIntensity"] = visual_intensity
+    
+    # Style reference
     if style_ref_path:
-        if os.environ.get('STORAGE_TYPE') == 'azure':
-            # Upload to Azure and get URL
-            from utils.storage import upload_to_azure_storage
-            style_ref_url = upload_to_azure_storage(style_ref_path)
-            data["style"] = {
-                "imageReference": {
-                    "source": {
-                        "url": style_ref_url
-                    }
-                },
-                "strength": style_ref_strength
-            }
-        else:
-            # Use local file path
-            data["style"] = {
-                "imageReference": {
-                    "source": {
-                        "url": f"file://{os.path.abspath(style_ref_path)}"
-                    }
-                },
-                "strength": style_ref_strength
-            }
+        # Upload or resolve style_ref_path to a URL if needed
+        style_url = style_ref_path
+        if style_url.startswith('file://') or os.path.exists(style_url):
+            style_url = upload_to_azure_storage(style_url)
+        data["styles"] = [{
+            "imageReference": {
+                "source": {"url": style_url}
+            },
+            "strength": style_ref_strength
+        }]
+    
+    # Composition reference (structure)
+    if composition_ref_path:
+        # Upload or resolve composition_ref_path to a URL if needed
+        cref_url = composition_ref_path
+        if cref_url.startswith('file://') or os.path.exists(cref_url):
+            cref_url = upload_to_azure_storage(cref_url)
+        data["structure"] = {
+            "imageReference": {
+                "source": {"url": cref_url}
+            },
+            "strength": composition_ref_strength
+        }
     
     if debug:
         print("Request data:", json.dumps(data, indent=2))
@@ -98,10 +97,10 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
         response = requests.post(url, headers=headers, json=data)
         response.raise_for_status()
         return response.json()
-    except requests.exceptions.HTTPError as e:
-        if debug:
-            print(f"Error response: {e.response.text}")
-        raise Exception(f"API request failed: {e.response.text}")
+    except requests.HTTPError as e:
+        if debug and e.response is not None:
+            print("API Error Response:", e.response.text)
+        raise
 
 def normalize_model_name(model_name, debug=False):
     """
