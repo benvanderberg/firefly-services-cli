@@ -10,6 +10,8 @@ A command-line interface for Adobe Firefly Services, providing access to image g
 - Multiple variations and style references
 - Customizable image dimensions and content classes
 - Token-based output filenames with automatic directory creation
+- **Rate-limited parallel image generation:** Generate multiple image variations in parallel, with automatic throttling to respect the `THROTTLE_LIMIT_FIREFLY` environment variable (default: 5 calls per 60 seconds).
+- **Configurable throttle limit:** Set the maximum number of API calls per minute using the `THROTTLE_LIMIT_FIREFLY` variable in your `.env` file.
 
 ### Text-to-Speech
 - Convert text to speech using various voices
@@ -46,6 +48,7 @@ Create a `.env` file with your Adobe Firefly Services credentials:
 ```
 FIREFLY_SERVICES_CLIENT_ID=your_client_id
 FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret
+THROTTLE_LIMIT_FIREFLY=5  # Maximum number of image generation API calls per 60 seconds
 ```
 
 ## Usage
@@ -69,6 +72,9 @@ ff.py image -prompt "a cute husky dog" -s "2048x2048" -o output.jpg
 
 # Token-based output path
 ff.py image -prompt "a cute husky dog" -o "outputs/{model}/{var1}_{dimensions}_{sr}_{n}.jpg"
+
+# Parallel generation with throttling (respects THROTTLE_LIMIT_FIREFLY)
+ff.py image -prompt "a [cute,playful] husky dog" -o "outputs/{model}/{var1}_{n}.jpg" -n 4
 ```
 
 ### Text-to-Speech
