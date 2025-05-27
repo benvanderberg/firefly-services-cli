@@ -21,6 +21,7 @@ FIREFLY_SERVICES_CLIENT_ID=your_client_id
 FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret
 AZURE_STORAGE_CONNECTION_STRING=your_azure_storage_connection_string
 AZURE_STORAGE_CONTAINER=your_azure_storage_container_name
+STORAGE_TYPE=azure
 ```
 
 ## Available Commands
@@ -35,6 +36,8 @@ python ff.py image -prompt "your prompt" -o output.jpg [options]
 
 Options:
 - `-prompt, --prompt`: Text prompt for image generation (required)
+  - Supports variations using [option1,option2,...] syntax
+  - Multiple variations can be combined to generate all possible combinations
 - `-o, --output`: Output file path (required)
 - `-n, --number`: Number of images to generate (1-4, default: 1)
 - `-m, --model`: Firefly model version to use
@@ -54,16 +57,36 @@ Options:
 - `-d, --debug`: Show debug information including full HTTP request details
 - `-silent, --silent`: Minimize output messages (only shows final result)
 - `-ow, --overwrite`: Overwrite existing files instead of adding number suffix
+- `-sr, --styleref`: Path to a style reference image file. If STORAGE_TYPE=azure, the file will be uploaded to Azure Storage and the URL will be used.
 
 File Handling:
 - If the output file already exists and `-ow` is not used, a number suffix will be added (e.g., `output_1.jpg`, `output_2.jpg`, etc.)
 - If `-ow` is used, the existing file will be overwritten
 - When generating multiple images (`-n > 1`), files are always numbered sequentially
+- When using prompt variations, the variation values are appended to the filename (e.g., `output_dog.jpg`, `output_cat.jpg`)
+
+Prompt Variations:
+- Use [option1,option2,...] syntax to specify variations in the prompt
+- Multiple variations can be combined to generate all possible combinations
+- The variation values are automatically appended to the output filename
+- For multiple variations, the values are joined with underscores
 
 Examples:
 ```bash
 # Basic image generation
 python ff.py image -prompt "a beautiful sunset over mountains" -o sunset.jpg
+
+# Generate with style reference
+python ff.py image -prompt "a beautiful sunset" -o sunset.jpg -sr style_reference.jpg
+
+# Generate with style reference and Azure storage
+python ff.py image -prompt "a beautiful sunset" -o sunset.jpg -sr style_reference.jpg
+
+# Generate with single variation
+python ff.py image -prompt "a cute [dog,cat,giraffe,llama] with big eyes" -o animal.jpg
+
+# Generate with multiple variations
+python ff.py image -prompt "a cute [dog,cat] with [blue,green] eyes" -o animal.jpg
 
 # Generate multiple images with specific model (using shorthand)
 python ff.py image -prompt "a futuristic city" -o city.jpg -n 4 -m ultra

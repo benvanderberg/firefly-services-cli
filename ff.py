@@ -8,10 +8,12 @@ import time
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from tabulate import tabulate
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, UTC
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
 import mimetypes
 import json
+import re
+from itertools import product
 
 def get_size_mapping(model_version):
     """
@@ -355,7 +357,7 @@ def read_text_file(file_path):
 
 def generate_image(access_token, prompt, num_generations=1, model_version='image3', content_class='photo',
                   negative_prompt=None, prompt_biasing_locale=None, size=None, seeds=None, debug=False,
-                  visual_intensity=None):
+                  visual_intensity=None, style_ref_path=None):
     """
     Generate images using Adobe Firefly Services API.
     
@@ -371,6 +373,7 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
         seeds (list): List of seeds for generation
         debug (bool): Enable debug output
         visual_intensity (int): Visual intensity of the generated image (1-10)
+        style_ref_path (str): Path to style reference image file
     
     Returns:
         dict: Job information including job ID and status
@@ -405,24 +408,35 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
     if visual_intensity is not None:
         # Convert 1-10 scale to 0.0-1.0 scale
         data["intensity"] = visual_intensity / 10.0
-    
-    if debug:
-        print("\nRequest Details:")
-        print(f"URL: {url}")
-        print("Headers:", json.dumps(headers, indent=2))
-        print("Request Body:", json.dumps(data, indent=2))
 
-    response = requests.post(
-        url,
-        headers=headers,
-        json=data
-    )
+    # Handle style reference if provided
+    if style_ref_path:
+        if os.environ.get('STORAGE_TYPE') == 'azure':
+            # Upload to Azure and get URL
+            style_ref_url = upload_to_azure_storage(style_ref_path)
+            data["style"] = {
+                "imageReference": {
+                    "source": {
+                        "url": style_ref_url
+                    }
+                },
+                "strength": 100  # Full adherence to style
+            }
+        else:
+            # Use local file path
+            data["style"] = {
+                "imageReference": {
+                    "source": {
+                        "url": f"file://{os.path.abspath(style_ref_path)}"
+                    }
+                },
+                "strength": 100  # Full adherence to style
+            }
     
     if debug:
-        print("\nResponse Status:", response.status_code)
-        print("Response Headers:", dict(response.headers))
-        print("Response Body:", response.text)
+        print("Request data:", json.dumps(data, indent=2))
     
+    response = requests.post(url, headers=headers, json=data)
     response.raise_for_status()
     return response.json()
 
@@ -467,7 +481,7 @@ def upload_to_azure_storage(file_path):
         blob_name=file_name,
         account_key=blob_service_client.credential.account_key,
         permission=BlobSasPermissions(read=True),
-        expiry=datetime.utcnow() + timedelta(hours=1)
+        expiry=datetime.now(UTC) + timedelta(hours=1)
     )
     
     # Generate the presigned URL
@@ -630,6 +644,149 @@ def get_unique_filename(base_filename, overwrite=False):
             return new_filename
         counter += 1
 
+def parse_prompt_variations(prompt):
+    """
+    Parse a prompt string containing variations in [option1,option2,...] format.
+    
+    Args:
+        prompt (str): The prompt string containing variations
+    
+    Returns:
+        tuple: (list of prompts, list of variation blocks)
+    """
+    import re
+    from itertools import product
+    
+    # Find all variation blocks in the prompt
+    variation_blocks = re.findall(r'\[(.*?)\]', prompt)
+    if not variation_blocks:
+        return [prompt], []
+    
+    # Split each block into options
+    options = [block.split(',') for block in variation_blocks]
+    
+    # Generate all possible combinations
+    combinations = list(product(*options))
+    
+    # Generate all possible prompts
+    prompts = []
+    for combo in combinations:
+        current_prompt = prompt
+        for i, value in enumerate(combo):
+            # Replace the first occurrence of [options] with the current value
+            current_prompt = re.sub(r'\[.*?\]', value.strip(), current_prompt, count=1)
+        prompts.append(current_prompt)
+    
+    return prompts, variation_blocks
+
+def replace_filename_tokens(filename, tokens):
+    """
+    Replace tokens in the filename with their corresponding values.
+    
+    Args:
+        filename (str): The filename containing tokens
+        tokens (dict): Dictionary of token values to replace
+    
+    Returns:
+        str: Filename with tokens replaced
+    """
+    # Define token patterns and their replacements
+    token_patterns = {
+        '{prompt}': lambda t: t.get('prompt', '').replace(' ', '_')[:30],  # Limit prompt length
+        '{date}': lambda t: datetime.now(UTC).strftime('%Y%m%d'),
+        '{time}': lambda t: datetime.now(UTC).strftime('%H%M%S'),
+        '{datetime}': lambda t: datetime.now(UTC).strftime('%Y%m%d_%H%M%S'),
+        '{seed}': lambda t: '_'.join(map(str, t.get('seeds', []))) if t.get('seeds') else '',
+        '{sr}': lambda t: os.path.splitext(os.path.basename(t.get('style_ref', '')))[0] if t.get('style_ref') else '',
+        '{model}': lambda t: t.get('model', ''),
+        '{width}': lambda t: str(t.get('size', {}).get('width', '')),
+        '{height}': lambda t: str(t.get('size', {}).get('height', '')),
+        '{dimensions}': lambda t: f"{t.get('size', {}).get('width', '')}x{t.get('size', {}).get('height', '')}" if t.get('size') else '',
+    }
+    
+    # Add variation tokens
+    for i, var in enumerate(tokens.get('variations', []), 1):
+        token_patterns[f'{{var{i}}}'] = lambda t, v=var: v.replace(' ', '_')
+    
+    # Replace all tokens in the filename
+    result = filename
+    for pattern, replacement_func in token_patterns.items():
+        if pattern in result:
+            result = result.replace(pattern, replacement_func(tokens))
+    
+    return result
+
+def parse_model_variations(model_str):
+    """
+    Parse model string containing variations in [option1,option2,...] format.
+    
+    Args:
+        model_str (str): The model string containing variations
+    
+    Returns:
+        list: List of model versions to use
+    """
+    import re
+    
+    # Check if the string contains variations
+    if '[' in model_str and ']' in model_str:
+        # Extract the variations
+        match = re.search(r'\[(.*?)\]', model_str)
+        if match:
+            # Split the options and strip whitespace
+            models = [m.strip() for m in match.group(1).split(',')]
+            # Normalize each model name
+            return [normalize_model_name(m) for m in models]
+    
+    # If no variations, return single model
+    return [normalize_model_name(model_str)]
+
+def get_variation_filename(base_filename, prompt, original_prompt, tokens=None):
+    """
+    Generate a filename with variation values appended.
+    
+    Args:
+        base_filename (str): The original filename
+        prompt (str): The current prompt with variations replaced
+        original_prompt (str): The original prompt with variation blocks
+        tokens (dict): Additional tokens for filename replacement
+    
+    Returns:
+        str: The filename with variation values appended
+    """
+    import re
+    
+    name, ext = os.path.splitext(base_filename)
+    
+    # Find all variation blocks in the original prompt
+    variation_blocks = re.findall(r'\[(.*?)\]', original_prompt)
+    
+    # Extract the values used in this prompt
+    variation_values = []
+    for block in variation_blocks:
+        options = block.split(',')
+        for option in options:
+            option = option.strip()
+            if option in prompt:
+                variation_values.append(option)
+                break
+    
+    # Join variation values with underscores and remove any special characters
+    variation_suffix = '_'.join(''.join(c for c in v if c.isalnum() or c.isspace()) for v in variation_values)
+    
+    # If we have tokens, replace them in the filename
+    if tokens:
+        # Add variations to tokens
+        tokens['variations'] = variation_values
+        # Replace tokens in the name
+        name = replace_filename_tokens(name, tokens)
+        
+        # If model token is not in the filename, append it
+        if '{model}' not in base_filename and tokens.get('model'):
+            name = f"{name}_{tokens['model']}"
+    
+    return f"{name}_{variation_suffix}{ext}"
+
 def main():
     """
     Main function that handles command line arguments and orchestrates the process.
@@ -639,12 +796,12 @@ def main():
 
     # Image generation command
     image_parser = subparsers.add_parser('image', help='Generate images')
-    image_parser.add_argument('-prompt', '--prompt', required=True, help='Text prompt for image generation')
-    image_parser.add_argument('-o', '--output', required=True, help='Output file path for the generated image')
+    image_parser.add_argument('-prompt', '--prompt', required=True, help='Text prompt for image generation. Use [option1,option2,...] for variations')
+    image_parser.add_argument('-o', '--output', required=True, help='Output file path for the generated image. Supports tokens: {prompt}, {date}, {time}, {datetime}, {seed}, {sr}, {model}, {width}, {height}, {dimensions}, {var1}, {var2}, etc.')
     image_parser.add_argument('-n', '--number', type=int, default=1, choices=range(1, 5),
                             help='Number of images to generate (1-4, default: 1)')
-    image_parser.add_argument('-m', '--model', choices=['image3', 'image3_custom', 'image4', 'image4_standard', 'image4_ultra', 'ultra'],
-                            default='image3', help='Firefly model version to use (image4 = image4_standard, ultra = image4_ultra)')
+    image_parser.add_argument('-m', '--model', default='image3',
+                            help='Firefly model version to use. Can be a single model or variations in [model1,model2,...] format. Choices: image3, image3_custom, image4, image4_standard, image4_ultra, ultra')
     image_parser.add_argument('-c', '--content-class', choices=['photo', 'art'], default='photo',
                             help='Type of content to generate (default: photo)')
     image_parser.add_argument('-np', '--negative-prompt', help='Text describing what to avoid in the generation')
@@ -659,6 +816,7 @@ def main():
                             help='Minimize output messages')
     image_parser.add_argument('-ow', '--overwrite', action='store_true',
                             help='Overwrite existing files instead of adding number suffix')
+    image_parser.add_argument('-sr', '--styleref', help='Path to a style reference image file')
 
     # Text-to-speech command
     tts_parser = subparsers.add_parser('tts', help='Generate speech from text')
@@ -714,62 +872,96 @@ def main():
                     print(str(e))
                     sys.exit(1)
 
-            # Normalize model name
-            model_version = normalize_model_name(args.model)
+            # Parse model variations
+            model_versions = parse_model_variations(args.model)
+            total_models = len(model_versions)
+
+            # Parse prompt variations
+            prompts, variation_blocks = parse_prompt_variations(args.prompt)
+            total_variations = len(prompts)
 
             if not args.silent:
-                display_model = format_model_name_for_display(model_version)
-                print(f'Firefly {display_model}: Generating image "{args.prompt}"...')
+                print(f'Generating {total_variations} variation(s) with {total_models} model(s)...')
 
-            # Submit the image generation job
-            job_info = generate_image(
-                access_token=access_token,
-                prompt=args.prompt,
-                num_generations=args.number,
-                model_version=model_version,
-                content_class=args.content_class,
-                negative_prompt=args.negative_prompt,
-                prompt_biasing_locale=args.locale,
-                size=size,
-                seeds=args.seeds,
-                debug=args.debug,
-                visual_intensity=args.visual_intensity
-            )
-            
-            if args.debug:
-                print(f"Job ID: {job_info['jobId']}")
-                print(f"Requested {args.number} image(s)")
-                print("Polling for job completion...")
-            
-            # Poll the status URL until the job is complete
-            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
-            
-            # Extract and download the generated images
-            if 'result' in result and 'outputs' in result['result']:
-                outputs = result['result']['outputs']
-                total_outputs = len(outputs)
-                
-                if args.debug:
-                    print(f"\nFound {total_outputs} generated image(s)")
-                
-                # Download each output
-                for i, output in enumerate(outputs):
-                    image_url = output['image']['url']
-                    if total_outputs == 1:
-                        output_filename = get_unique_filename(args.output, args.overwrite)
-                    else:
-                        # For multiple outputs, we'll always add a number suffix
-                        name, ext = os.path.splitext(args.output)
-                        output_filename = f"{name}_{i + 1}{ext}"
+            # Process each model version
+            for model_version in model_versions:
+                if not args.silent:
+                    display_model = format_model_name_for_display(model_version)
+                    print(f"\nUsing Firefly {display_model}")
+
+                # Process each prompt variation
+                for i, prompt in enumerate(prompts, 1):
+                    if not args.silent:
+                        print(f"\nVariation {i}/{total_variations}: {prompt}")
+
+                    # Submit the image generation job
+                    job_info = generate_image(
+                        access_token=access_token,
+                        prompt=prompt,
+                        num_generations=args.number,
+                        model_version=model_version,
+                        content_class=args.content_class,
+                        negative_prompt=args.negative_prompt,
+                        prompt_biasing_locale=args.locale,
+                        size=size,
+                        seeds=args.seeds,
+                        debug=args.debug,
+                        visual_intensity=args.visual_intensity,
+                        style_ref_path=args.styleref
+                    )
                     
                     if args.debug:
-                        print(f"Downloading image {i + 1} of {total_outputs} to {output_filename}...")
-                    download_file(image_url, output_filename, args.silent, args.debug)
-                
-                if total_outputs == 1:
-                    print(f"Saved to {output_filename}")
-                else:
-                    print(f"Saved {total_outputs} images")
+                        print(f"Job ID: {job_info['jobId']}")
+                        print(f"Requested {args.number} image(s)")
+                        print("Polling for job completion...")
+                    
+                    # Poll the status URL until the job is complete
+                    result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
+                    
+                    # Extract and download the generated images
+                    if 'result' in result and 'outputs' in result['result']:
+                        outputs = result['result']['outputs']
+                        total_outputs = len(outputs)
+                        
+                        if args.debug:
+                            print(f"\nFound {total_outputs} generated image(s)")
+                        
+                        # Prepare tokens for filename
+                        tokens = {
+                            'prompt': prompt,
+                            'model': model_version,
+                            'size': size,
+                            'seeds': args.seeds,
+                            'style_ref': args.styleref
+                        }
+                        
+                        # Download each output
+                        for j, output in enumerate(outputs):
+                            image_url = output['image']['url']
+                            if total_outputs == 1:
+                                # For single output, use variation in filename
+                                base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens)
+                                output_filename = get_unique_filename(base_filename, args.overwrite)
+                            else:
+                                # For multiple outputs, combine variation and output number
+                                base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens)
+                                name, ext = os.path.splitext(base_filename)
+                                output_filename = f"{name}_{j + 1}{ext}"
+                            
+                            if args.debug:
+                                print(f"Downloading image {j + 1} of {total_outputs} to {output_filename}...")
+                            download_file(image_url, output_filename, args.silent, args.debug)
+                        
+                        if total_outputs == 1:
+                            print(f"Saved to {output_filename}")
+                        else:
+                            print(f"Saved {total_outputs} images for variation {i}")
+
+                if not args.silent:
+                    print(f"\nCompleted {total_variations} variation(s) with {display_model}")
+
+            if not args.silent:
+                print(f"\nCompleted all {total_models} model(s)")
 
         elif args.command == 'tts':
             # Get text from either direct input or file
