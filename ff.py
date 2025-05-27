@@ -84,10 +84,13 @@ def parse_size(size_str, model_version):
     except ValueError:
         raise ValueError(f"Invalid size format. Must be either WIDTHxHEIGHT or one of the named sizes: {', '.join(size_mapping.keys())}")
 
-def retrieve_access_token():
+def retrieve_access_token(silent=False):
     """
     Retrieve an access token from Adobe's authentication service.
     Uses client credentials from environment variables or .env file.
+    
+    Args:
+        silent (bool): Whether to suppress output messages
     
     Returns:
         str: The access token for API authentication
@@ -112,7 +115,8 @@ def retrieve_access_token():
     response = requests.post(token_url, data=payload)
     response.raise_for_status()
     token_data = response.json()
-    print("Access Token Retrieved")
+    if not silent:
+        print("Access Token Retrieved")
     return token_data['access_token']
 
 def get_available_voices(access_token):
@@ -237,13 +241,15 @@ def dub_media(access_token, source_url, target_locale, output_format="mp4"):
     response.raise_for_status()
     return response.json()
 
-def check_job_status(status_url, access_token):
+def check_job_status(status_url, access_token, silent=False, debug=False):
     """
     Poll the status URL until the job is complete.
     
     Args:
         status_url (str): The URL to check job status
         access_token (str): The authentication token
+        silent (bool): Whether to suppress output messages
+        debug (bool): Whether to show debug information
     
     Returns:
         dict: The completed job result
@@ -262,23 +268,27 @@ def check_job_status(status_url, access_token):
         response.raise_for_status()
         status_data = response.json()
         
-        print("\nStatus Response:", status_data)
+        if debug:
+            print("\nStatus Response:", status_data)
         
         if status_data.get('status') == 'succeeded':
             return status_data
         elif status_data.get('status') == 'failed':
             raise Exception(f"Job failed: {status_data.get('error', 'Unknown error')}")
         
-        print("Waiting for job completion...")
+        if debug:
+            print("Waiting for job completion...")
         time.sleep(2)  # Wait 2 seconds before checking again
 
-def download_file(url, output_file):
+def download_file(url, output_file, silent=False, debug=False):
     """
     Download a file from a URL and save it to a file.
     
     Args:
         url (str): The URL of the file to download
         output_file (str): The path where the file should be saved
+        silent (bool): Whether to suppress output messages
+        debug (bool): Whether to show debug information
     """
     try:
         response = requests.get(url, stream=True)
@@ -288,7 +298,8 @@ def download_file(url, output_file):
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
-        print(f"File successfully downloaded to {output_file}")
+        if debug:
+            print(f"File successfully downloaded to {output_file}")
     except Exception as e:
         print(f"Error downloading file: {str(e)}")
         sys.exit(1)
@@ -560,6 +571,40 @@ def transcribe_media(access_token, file_path, media_type, target_locale="en-US",
     response.raise_for_status()
     return response.json()
 
+def normalize_model_name(model_name):
+    """
+    Normalize model name to its full version.
+    
+    Args:
+        model_name (str): The model name to normalize
+    
+    Returns:
+        str: The normalized model name
+    """
+    model_mapping = {
+        'image4': 'image4_standard',
+        'ultra': 'image4_ultra'
+    }
+    return model_mapping.get(model_name, model_name)
+
+def format_model_name_for_display(model_name):
+    """
+    Format model name for display in output messages.
+    
+    Args:
+        model_name (str): The model name to format
+    
+    Returns:
+        str: The formatted model name for display
+    """
+    model_display_names = {
+        'image3': 'Image 3',
+        'image3_custom': 'Image 3 Custom',
+        'image4_standard': 'Image 4',
+        'image4_ultra': 'Image 4 Ultra'
+    }
+    return model_display_names.get(model_name, model_name)
+
 def main():
     """
     Main function that handles command line arguments and orchestrates the process.
@@ -573,8 +618,8 @@ def main():
     image_parser.add_argument('-o', '--output', required=True, help='Output file path for the generated image')
     image_parser.add_argument('-n', '--number', type=int, default=1, choices=range(1, 5),
                             help='Number of images to generate (1-4, default: 1)')
-    image_parser.add_argument('-m', '--model', choices=['image3', 'image3_custom', 'image4_standard', 'image4_ultra'],
-                            default='image3', help='Firefly model version to use')
+    image_parser.add_argument('-m', '--model', choices=['image3', 'image3_custom', 'image4', 'image4_standard', 'image4_ultra', 'ultra'],
+                            default='image3', help='Firefly model version to use (image4 = image4_standard, ultra = image4_ultra)')
     image_parser.add_argument('-c', '--content-class', choices=['photo', 'art'], default='photo',
                             help='Type of content to generate (default: photo)')
     image_parser.add_argument('-np', '--negative-prompt', help='Text describing what to avoid in the generation')
@@ -585,6 +630,8 @@ def main():
                             help='Show debug information including full HTTP request details')
     image_parser.add_argument('-vi', '--visual-intensity', type=int, choices=range(1, 11),
                             help='Visual intensity of the generated image (1-10)')
+    image_parser.add_argument('-silent', '--silent', action='store_true',
+                            help='Minimize output messages')
 
     # Text-to-speech command
     tts_parser = subparsers.add_parser('tts', help='Generate speech from text')
@@ -628,7 +675,7 @@ def main():
 
     try:
         # Get authentication token
-        access_token = retrieve_access_token()
+        access_token = retrieve_access_token(args.silent)
 
         if args.command == 'image':
             # Parse size if provided
@@ -640,12 +687,19 @@ def main():
                     print(str(e))
                     sys.exit(1)
 
+            # Normalize model name
+            model_version = normalize_model_name(args.model)
+
+            if not args.silent:
+                display_model = format_model_name_for_display(model_version)
+                print(f'Firefly {display_model}: Generating image "{args.prompt}"...')
+
             # Submit the image generation job
             job_info = generate_image(
                 access_token=access_token,
                 prompt=args.prompt,
                 num_generations=args.number,
-                model_version=args.model,
+                model_version=model_version,
                 content_class=args.content_class,
                 negative_prompt=args.negative_prompt,
                 prompt_biasing_locale=args.locale,
@@ -655,26 +709,31 @@ def main():
                 visual_intensity=args.visual_intensity
             )
             
-            print(f"Job ID: {job_info['jobId']}")
-            print(f"Requested {args.number} image(s)")
-            print("Polling for job completion...")
+            if args.debug:
+                print(f"Job ID: {job_info['jobId']}")
+                print(f"Requested {args.number} image(s)")
+                print("Polling for job completion...")
             
             # Poll the status URL until the job is complete
-            result = check_job_status(job_info['statusUrl'], access_token)
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
             
             # Extract and download the generated images
             if 'result' in result and 'outputs' in result['result']:
                 outputs = result['result']['outputs']
                 total_outputs = len(outputs)
                 
-                print(f"\nFound {total_outputs} generated image(s)")
+                if args.debug:
+                    print(f"\nFound {total_outputs} generated image(s)")
                 
                 # Download each output
                 for i, output in enumerate(outputs):
                     image_url = output['image']['url']
                     output_filename = get_output_filename(args.output, i, total_outputs)
-                    print(f"Downloading image {i + 1} of {total_outputs} to {output_filename}...")
-                    download_file(image_url, output_filename)
+                    if args.debug:
+                        print(f"Downloading image {i + 1} of {total_outputs} to {output_filename}...")
+                    download_file(image_url, output_filename, args.silent, args.debug)
+                
+                print(f"Saved to {args.output}")
 
         elif args.command == 'tts':
             # Get text from either direct input or file
@@ -693,13 +752,13 @@ def main():
             print("Polling for job completion...")
             
             # Poll the status URL until the job is complete
-            result = check_job_status(job_info['statusUrl'], access_token)
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
             
             # Download the generated audio
             if result.get('status') == 'succeeded' and 'output' in result and 'url' in result['output']:
                 audio_url = result['output']['url']
                 print(f"Downloading audio to {args.output}...")
-                download_file(audio_url, args.output)
+                download_file(audio_url, args.output, args.silent, args.debug)
             else:
                 print("Error: No output URL found in the response")
                 if args.debug:
@@ -719,13 +778,13 @@ def main():
             print("Polling for job completion...")
             
             # Poll the status URL until the job is complete
-            result = check_job_status(job_info['statusUrl'], access_token)
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
             
             # Download the dubbed media
             if 'result' in result and 'output' in result['result']:
                 media_url = result['result']['output']['url']
                 print(f"Downloading dubbed media to {args.output}...")
-                download_file(media_url, args.output)
+                download_file(media_url, args.output, args.silent, args.debug)
 
         elif args.command == 'voices':
             # List available voices
@@ -783,7 +842,7 @@ def main():
             print("Polling for job completion...")
             
             # Poll the status URL until the job is complete
-            result = check_job_status(job_info['statusUrl'], access_token)
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
             
             # Process the transcription results
             if result.get('status') == 'succeeded':
@@ -823,8 +882,6 @@ def main():
                     print(f"Transcription saved to {args.output}")
                 else:
                     print("Error: No transcription output found in response")
-                    if args.debug:
-                        print("Full response:", result)
                 if args.debug:
                     print("Full response:", result)
             else:

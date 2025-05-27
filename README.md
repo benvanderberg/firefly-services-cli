@@ -38,7 +38,8 @@ Options:
 - `-o, --output`: Output file path (required)
 - `-n, --number`: Number of images to generate (1-4, default: 1)
 - `-m, --model`: Firefly model version to use
-  - Choices: `image3`, `image3_custom`, `image4_standard`, `image4_ultra`
+  - Choices: `image3`, `image3_custom`, `image4`, `image4_standard`, `image4_ultra`, `ultra`
+  - Shorthand: `image4` = `image4_standard`, `ultra` = `image4_ultra`
   - Default: `image3`
 - `-c, --content-class`: Type of content to generate
   - Choices: `photo`, `art`
@@ -51,21 +52,30 @@ Options:
 - `--seeds`: Seed values for consistent generation (1-4 values)
 - `-vi, --visual-intensity`: Visual intensity of the generated image (1-10)
 - `-d, --debug`: Show debug information including full HTTP request details
+- `-silent, --silent`: Minimize output messages (only shows final result)
 
 Examples:
 ```bash
 # Basic image generation
 python ff.py image -prompt "a beautiful sunset over mountains" -o sunset.jpg
 
-# Generate multiple images with specific model
-python ff.py image -prompt "a futuristic city" -o city.jpg -n 4 -m image4_ultra
+# Generate multiple images with specific model (using shorthand)
+python ff.py image -prompt "a futuristic city" -o city.jpg -n 4 -m ultra
 
 # Generate art with negative prompt and visual intensity
 python ff.py image -prompt "a peaceful garden" -o garden.jpg -c art -np "no people, no buildings" -vi 8
 
 # Generate image with specific size and seeds
 python ff.py image -prompt "a mountain landscape" -o mountain.jpg -s landscape --seeds 12345 67890
+
+# Generate image with minimal output
+python ff.py image -prompt "a cute dog" -o dog.jpg -silent
 ```
+
+The command will display the model name in a user-friendly format:
+- `image3` → "Firefly Image 3"
+- `image4_standard` or `image4` → "Firefly Image 4"
+- `image4_ultra` or `ultra` → "Firefly Image 4 Ultra"
 
 ### Text-to-Speech
 
