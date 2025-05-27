@@ -5,6 +5,8 @@ import requests
 from datetime import datetime, timedelta, UTC
 from tabulate import tabulate
 from dotenv import load_dotenv
+from utils.rate_limiter import RateLimiter
+import concurrent.futures
 
 from utils.auth import retrieve_access_token
 from services.image import generate_image, parse_model_variations, parse_style_ref_variations
@@ -36,129 +38,103 @@ def handle_command(args):
         sys.exit(1)
 
 def handle_image_command(args, access_token):
-    """Handle the image generation command."""
-    try:
-        # Parse model variations first
-        model_versions = parse_model_variations(args.model, args.debug)
-        total_models = len(model_versions)
+    """Handle the image generation command with rate limiting and parallelism."""
+    # Parse model variations first
+    model_versions = parse_model_variations(args.model, args.debug)
+    total_models = len(model_versions)
 
-        # Parse size if provided, using the first model version for size mapping
-        size = None
-        if args.size:
-            try:
-                size = parse_size(args.size, model_versions[0], args.debug)
-            except ValueError as e:
-                print(str(e))
-                sys.exit(1)
+    # Parse size if provided, using the first model version for size mapping
+    size = None
+    if args.size:
+        try:
+            size = parse_size(args.size, model_versions[0], args.debug)
+        except ValueError as e:
+            print(str(e))
+            sys.exit(1)
 
-        # Parse prompt variations
-        prompts, variation_blocks = parse_prompt_variations(args.prompt)
-        total_variations = len(prompts)
+    # Parse prompt variations
+    prompts, variation_blocks = parse_prompt_variations(args.prompt)
+    total_variations = len(prompts)
 
-        # Parse style reference variations
-        style_refs = parse_style_ref_variations(args.style_reference) if args.style_reference else [None]
-        total_style_refs = len(style_refs)
+    # Parse style reference variations
+    style_refs = parse_style_ref_variations(args.style_reference) if args.style_reference else [None]
+    total_style_refs = len(style_refs)
 
-        if not args.silent:
-            print(f'Generating {total_variations} variation(s) with {total_models} model(s) and {total_style_refs} style reference(s)...')
-            if args.numVariations > 1:
-                print(f'Each variation will generate {args.numVariations} images')
+    # Get throttle limit from environment
+    throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
+    rate_limiter = RateLimiter(throttle_limit, 60)
 
-        # Process each model version
+    if not args.silent:
+        print(f'Generating {total_variations} variation(s) with {total_models} model(s) and {total_style_refs} style reference(s)...')
+        if args.numVariations > 1:
+            print(f'Each variation will generate {args.numVariations} images')
+        print(f'Using parallel processing with rate limit of {throttle_limit} calls per minute')
+
+    def image_task(prompt, model_version, style_ref, j):
+        rate_limiter.acquire()
+        tokens = {
+            'prompt': prompt,
+            'model': model_version,
+            'size': size,
+            'seeds': args.seeds,
+            'style_ref': style_ref,
+            'iteration': j + 1
+        }
+        base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens)
+        output_filename = get_unique_filename(base_filename, args.overwrite)
+        try:
+            job_info = generate_image(
+                access_token=access_token,
+                prompt=prompt,
+                num_generations=1,
+                model_version=model_version,
+                content_class=args.content_class,
+                negative_prompt=args.negative_prompt,
+                prompt_biasing_locale=args.locale,
+                size=size,
+                seeds=args.seeds,
+                debug=args.debug,
+                visual_intensity=args.visual_intensity,
+                style_ref_path=style_ref,
+                style_ref_strength=args.style_reference_strength
+            )
+            if args.debug:
+                print(f"Job ID: {job_info['jobId']}")
+                print("Polling for job completion...")
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
+            if 'result' in result and 'outputs' in result['result']:
+                outputs = result['result']['outputs']
+                if outputs:
+                    image_url = outputs[0]['image']['url']
+                    if args.debug:
+                        print(f"Downloading image to {output_filename}...")
+                    download_file(image_url, output_filename, args.silent, args.debug)
+                    return True
+            return False
+        except Exception as e:
+            print(f"Error generating image: {str(e)}")
+            if args.debug:
+                import traceback
+                traceback.print_exc()
+            return False
+
+    tasks = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=throttle_limit) as executor:
         for model_version in model_versions:
             if not args.silent:
                 print(f"\nUsing Firefly {model_version}")
-
-            # Process each style reference
             for style_ref in style_refs:
                 if style_ref and not args.silent:
                     print(f"\nUsing style reference: {style_ref}")
-
-                # Process each prompt variation
                 for i, prompt in enumerate(prompts, 1):
                     if not args.silent:
                         print(f"\nVariation {i}/{total_variations}: {prompt}")
-
-                    try:
-                        # Submit the image generation job
-                        job_info = generate_image(
-                            access_token=access_token,
-                            prompt=prompt,
-                            num_generations=args.numVariations,
-                            model_version=model_version,
-                            content_class=args.content_class,
-                            negative_prompt=args.negative_prompt,
-                            prompt_biasing_locale=args.locale,
-                            size=size,
-                            seeds=args.seeds,
-                            debug=args.debug,
-                            visual_intensity=args.visual_intensity,
-                            style_ref_path=style_ref,
-                            style_ref_strength=args.style_reference_strength
-                        )
-                        
-                        if args.debug:
-                            print(f"Job ID: {job_info['jobId']}")
-                            print(f"Requested {args.numVariations} image(s)")
-                            print("Polling for job completion...")
-                        
-                        # Poll the status URL until the job is complete
-                        result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
-                        
-                        # Extract and download the generated images
-                        if 'result' in result and 'outputs' in result['result']:
-                            outputs = result['result']['outputs']
-                            total_outputs = len(outputs)
-                            
-                            if args.debug:
-                                print(f"\nFound {total_outputs} generated image(s)")
-                            
-                            # Download each output
-                            for j, output in enumerate(outputs):
-                                image_url = output['image']['url']
-                                
-                                # Prepare tokens for filename
-                                tokens = {
-                                    'prompt': prompt,
-                                    'model': model_version,
-                                    'size': size,
-                                    'seeds': args.seeds,
-                                    'style_ref': style_ref,
-                                    'iteration': j + 1  # Add iteration number (1-based)
-                                }
-                                
-                                # Generate filename with tokens
-                                base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens)
-                                output_filename = get_unique_filename(base_filename, args.overwrite)
-                                
-                                if args.debug:
-                                    print(f"Downloading image {j + 1} of {total_outputs} to {output_filename}...")
-                                download_file(image_url, output_filename, args.silent, args.debug)
-                            
-                            if total_outputs == 1:
-                                print(f"Saved to {output_filename}")
-                            else:
-                                print(f"Saved {total_outputs} images for variation {i}")
-
-                        if not args.silent:
-                            print(f"\nCompleted {total_variations} variation(s) with {model_version}" + (f" and style reference {style_ref}" if style_ref else ""))
-
-                    except Exception as e:
-                        print(f"Error generating image: {str(e)}")
-                        if args.debug:
-                            import traceback
-                            traceback.print_exc()
-                        sys.exit(1)
-
-            if not args.silent:
-                print(f"\nCompleted all {total_models} model(s) and {total_style_refs} style reference(s)")
-
-    except Exception as e:
-        print(f"Error: {str(e)}")
-        if args.debug:
-            import traceback
-            traceback.print_exc()
-        sys.exit(1)
+                    for j in range(args.numVariations):
+                        tasks.append(executor.submit(image_task, prompt, model_version, style_ref, j))
+        for future in concurrent.futures.as_completed(tasks):
+            future.result()
+    if not args.silent:
+        print("All image generation tasks completed.")
 
 def handle_tts_command(args, access_token):
     """Handle the text-to-speech command."""
