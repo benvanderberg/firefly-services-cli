@@ -1,6 +1,6 @@
-# Adobe Firefly Services CLI
+# Firefly Services CLI
 
-A command-line interface for Adobe Firefly Services, providing access to image generation, text-to-speech, dubbing, and transcription capabilities.
+A command-line interface for Adobe Firefly Services, providing easy access to image generation, text-to-speech, dubbing, and transcription capabilities.
 
 ## Features
 
@@ -37,133 +37,192 @@ A command-line interface for Adobe Firefly Services, providing access to image g
 
 ## Installation
 
+### Prerequisites
+- Python 3.8 or higher
+- pip (Python package installer)
+
+### Mac Installation
 1. Clone the repository:
 ```bash
 git clone https://github.com/yourusername/firefly-services-cli.git
 cd firefly-services-cli
 ```
 
-2. Install dependencies:
+2. Create and activate a virtual environment (recommended):
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+3. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-3. Set up environment variables:
-Create a `.env` file with your Adobe Firefly Services credentials:
-```
+4. Create a `.env` file in the project root with your Adobe credentials:
+```bash
 FIREFLY_SERVICES_CLIENT_ID=your_client_id
 FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret
-THROTTLE_LIMIT_FIREFLY=5  # Maximum number of image generation API calls per 60 seconds
+THROTTLE_LIMIT_FIREFLY=5  # Optional: Set API rate limit (default: 5 calls per minute)
+```
+
+### Windows Installation
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/firefly-services-cli.git
+cd firefly-services-cli
+```
+
+2. Create and activate a virtual environment (recommended):
+```bash
+python -m venv venv
+.\venv\Scripts\activate
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+4. Create a `.env` file in the project root with your Adobe credentials:
+```bash
+FIREFLY_SERVICES_CLIENT_ID=your_client_id
+FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret
+THROTTLE_LIMIT_FIREFLY=5  # Optional: Set API rate limit (default: 5 calls per minute)
 ```
 
 ## Usage
 
 ### Image Generation
+Generate images using text prompts with various models and styles.
+
 ```bash
-# Basic image generation
-ff.py image -prompt "a cute husky dog" -o output.jpg
-
-# Multiple variations
-ff.py image -prompt "a [cute,playful] husky dog" -o output.jpg
-
-# Multiple models
-ff.py image -prompt "a cute husky dog" -m "[image3,image4_ultra]" -o output.jpg
-
-# Style reference
-ff.py image -prompt "a cute husky dog" -sr style.jpg -o output.jpg
-
-# Custom size
-ff.py image -prompt "a cute husky dog" -s "2048x2048" -o output.jpg
-
-# Token-based output path
-ff.py image -prompt "a cute husky dog" -o "outputs/{model}/{var1}_{dimensions}_{sr}_{n}.jpg"
-
-# Parallel generation with throttling (respects THROTTLE_LIMIT_FIREFLY)
-ff.py image -prompt "a [cute,playful] husky dog" -o "outputs/{model}/{var1}_{n}.jpg" -n 4
+./ff.py image -p "your prompt" -o output.jpg
 ```
 
-### Image Editing
-```bash
-# Generative Fill
-ff.py fill -i input.jpg -m mask.jpg -p "feathers and balls" -o output.jpg
-
-# Generative Expand
-ff.py expand -i input.jpg -p "extend the scene" -o output.jpg
-
-# Similar Image Generation
-ff.py similar-image -i input.jpg -o output.jpg
-```
+Options:
+- `-p, --prompt`: Text prompt for image generation
+- `-m, --model`: Model version (e.g., "firefly-2.0")
+- `-s, --size`: Image size (e.g., "1024x1024")
+- `-n, --numVariations`: Number of variations (1-4)
+- `-o, --output`: Output file path
+- `-d, --debug`: Enable debug output
 
 ### Text-to-Speech
+Convert text to speech using various voices and styles.
+
 ```bash
-# Basic text-to-speech
-ff.py tts -t "Hello, world!" -v voice_id -o output.mp3
-
-# From file
-ff.py tts -f input.txt -v voice_id -o output.mp3
-
-# Different locale
-ff.py tts -t "Hello, world!" -v voice_id -l fr-FR -o output.mp3
-
-# List available voices
-ff.py voices
-# or use the shorter alias
-ff.py v
+./ff.py tts -f input.txt -v "[John,Maria]" -vs "[Casual,Happy]" -o "outputs/speech_{voice_name}_{voice_style}.mp3"
 ```
+
+Options:
+- `-f, --file`: Input text file
+- `-t, --text`: Direct text input
+- `-v, --voice`: Voice names (comma-separated)
+- `-vs, --voice-style`: Voice styles (comma-separated)
+- `-o, --output`: Output file path with tokens
+- `-l, --locale`: Locale code (e.g., "en-US")
+- `-d, --debug`: Enable debug output
 
 ### Dubbing
-```bash
-# Dub video
-ff.py dub -i input.mp4 -l fr-FR -o output.mp4
+Dub media files to different languages.
 
-# Dub audio
-ff.py dub -i input.mp3 -l fr-FR -o output.mp3
+```bash
+./ff.py dub -i input.mp4 -l "es-ES" -o output.mp4
 ```
+
+Options:
+- `-i, --input`: Input media file
+- `-l, --locale`: Target locale code
+- `-f, --format`: Output format
+- `-o, --output`: Output file path
+- `-d, --debug`: Enable debug output
 
 ### Transcription
+Transcribe media files to text.
+
 ```bash
-# Transcribe video
-ff.py transcribe -i input.mp4 -t video -o output.txt
-
-# Transcribe audio with captions
-ff.py transcribe -i input.mp3 -t audio -c -o output.srt
-
-# Text-only output
-ff.py transcribe -i input.mp4 -t video -text -o output.txt
+./ff.py transcribe -i input.mp4 -l "en-US" -o output.txt
 ```
 
-## Output Filename Tokens
+Options:
+- `-i, --input`: Input media file
+- `-l, --locale`: Target locale code
+- `-t, --type`: Media type
+- `-c, --captions`: Generate captions
+- `-o, --output`: Output file path
+- `-d, --debug`: Enable debug output
 
-When using the `-o` option, you can use the following tokens in the filename:
+### List Available Voices
+List all available voices for text-to-speech.
 
-- `{prompt}`: The text prompt (truncated to 30 chars)
-- `{date}`: Current date (YYYYMMDD)
-- `{time}`: Current time (HHMMSS)
-- `{datetime}`: Current date and time (YYYYMMDD_HHMMSS)
-- `{seed}`: Seed values used
-- `{sr}`: Style reference filename (without extension)
-- `{model}`: Model version used
+```bash
+./ff.py voices
+```
+
+Options:
+- `-d, --debug`: Enable debug output
+
+### Image Expansion
+Expand images beyond their original boundaries.
+
+```bash
+./ff.py expand -i input.jpg -p "prompt" -o output.jpg
+```
+
+Options:
+- `-i, --input`: Input image file
+- `-p, --prompt`: Text prompt
+- `-m, --mask`: Mask image file
+- `-mi, --mask-invert`: Invert mask
+- `-n, --numVariations`: Number of variations (1-4)
+- `-o, --output`: Output file path
+- `-d, --debug`: Enable debug output
+
+### Generative Fill
+Fill masked areas in images.
+
+```bash
+./ff.py fill -i input.jpg -m mask.jpg -p "prompt" -o output.jpg
+```
+
+Options:
+- `-i, --input`: Input image file
+- `-m, --mask`: Mask image file
+- `-p, --prompt`: Text prompt
+- `-n, --numVariations`: Number of variations (1-4)
+- `-o, --output`: Output file path
+- `-d, --debug`: Enable debug output
+
+## Output File Tokens
+
+The following tokens can be used in output filenames:
+
+- `{date}`: Current date (YYYY-MM-DD)
+- `{time}`: Current time (HH-MM-SS)
+- `{datetime}`: Current date and time (YYYY-MM-DD_HH-MM-SS)
+- `{voice_name}`: Voice name (for TTS)
+- `{voice_style}`: Voice style (for TTS)
+- `{voice_id}`: Voice ID (for TTS)
+- `{locale_code}`: Locale code
+- `{n}`: Variation number (for image generation)
+- `{model}`: Model version
+- `{size}`: Image size
 - `{width}`: Image width
 - `{height}`: Image height
-- `{dimensions}`: Image dimensions (WIDTHxHEIGHT)
-- `{n}`: Iteration number
-- `{var1}`, `{var2}`, etc.: Variation values
+- `{dimensions}`: Image dimensions (WxH)
 
-Example:
-```bash
-ff.py image -prompt "a [cute,playful] husky dog" -o "outputs/{model}/{var1}_{dimensions}_{n}.jpg"
-```
+## Rate Limiting
 
-## Additional Options
+The CLI includes built-in rate limiting to prevent API throttling. The default rate limit is 5 calls per minute, but this can be adjusted by setting the `THROTTLE_LIMIT_FIREFLY` environment variable in your `.env` file.
 
-### Debug Mode
-Add `-d` or `--debug` to any command to see detailed request and response information.
+## Debug Mode
 
-### Silent Mode
-Add `-silent` or `--silent` to minimize output messages.
-
-### Overwrite Files
-Add `-ow` or `--overwrite` to overwrite existing files instead of adding a number suffix.
+Add the `-d` or `--debug` flag to any command to enable detailed debug output, including:
+- API request/response details
+- File operations
+- Rate limiting information
+- Error traces
 
 ## Directory Structure
 
