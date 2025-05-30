@@ -13,6 +13,11 @@ A command-line interface for Adobe Firefly Services, providing access to image g
 - **Rate-limited parallel image generation:** Generate multiple image variations in parallel, with automatic throttling to respect the `THROTTLE_LIMIT_FIREFLY` environment variable (default: 5 calls per 60 seconds).
 - **Configurable throttle limit:** Set the maximum number of API calls per minute using the `THROTTLE_LIMIT_FIREFLY` variable in your `.env` file.
 
+### Image Editing
+- **Generative Fill:** Fill masked areas in images with AI-generated content
+- **Generative Expand:** Expand images beyond their original boundaries
+- **Similar Image Generation:** Create variations of existing images
+
 ### Text-to-Speech
 - Convert text to speech using various voices
 - Support for multiple languages and locales
@@ -77,6 +82,18 @@ ff.py image -prompt "a cute husky dog" -o "outputs/{model}/{var1}_{dimensions}_{
 ff.py image -prompt "a [cute,playful] husky dog" -o "outputs/{model}/{var1}_{n}.jpg" -n 4
 ```
 
+### Image Editing
+```bash
+# Generative Fill
+ff.py fill -i input.jpg -m mask.jpg -p "feathers and balls" -o output.jpg
+
+# Generative Expand
+ff.py expand -i input.jpg -p "extend the scene" -o output.jpg
+
+# Similar Image Generation
+ff.py similar-image -i input.jpg -o output.jpg
+```
+
 ### Text-to-Speech
 ```bash
 # Basic text-to-speech
@@ -87,6 +104,11 @@ ff.py tts -f input.txt -v voice_id -o output.mp3
 
 # Different locale
 ff.py tts -t "Hello, world!" -v voice_id -l fr-FR -o output.mp3
+
+# List available voices
+ff.py voices
+# or use the shorter alias
+ff.py v
 ```
 
 ### Dubbing

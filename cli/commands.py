@@ -13,7 +13,7 @@ from utils.auth import retrieve_access_token
 from utils.storage import upload_to_azure_storage
 from utils.rate_limiter import RateLimiter
 from utils.filename import parse_size, parse_prompt_variations, get_variation_filename, get_unique_filename, replace_filename_tokens
-from services.image import generate_image, parse_model_variations, parse_style_ref_variations, generate_similar_image, expand_image
+from services.image import generate_image, parse_model_variations, parse_style_ref_variations, generate_similar_image, expand_image, fill_image
 from services.speech import generate_speech, get_available_voices
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
@@ -57,6 +57,8 @@ def handle_command(args):
         handle_transcribe_command(args, access_token)
     elif args.command == 'expand':
         handle_expand_command(args, access_token)
+    elif args.command == 'fill':
+        handle_fill_command(args, access_token)
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
@@ -488,6 +490,46 @@ def handle_expand_command(args, access_token):
             image_url = output['image']['url']
             output_filename = args.output.replace("{n}", str(idx))
             print(f"Downloading expanded image to {output_filename}...")
+            download_file(image_url, output_filename, args.silent, args.debug)
+    else:
+        print("No outputs found in response.")
+
+def handle_fill_command(args, access_token):
+    """Handle the Generative Fill command."""
+    # Validate numVariations
+    if not 1 <= args.numVariations <= 4:
+        print("Error: Number of variations (-n) must be between 1 and 4")
+        sys.exit(1)
+
+    # Create output directory if it doesn't exist
+    output_dir = os.path.dirname(args.output)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Call fill_image
+    job_info = fill_image(
+        access_token=access_token,
+        image_path=args.input,
+        mask_path=args.mask,
+        prompt=args.prompt,
+        negative_prompt=args.negative_prompt,
+        prompt_biasing_locale=args.locale,
+        num_variations=args.numVariations,
+        mask_invert=args.mask_invert,
+        height=args.height,
+        width=args.width,
+        seeds=args.seeds,
+        debug=args.debug
+    )
+    print(f"Job ID: {job_info['jobId']}")
+    print("Polling for job completion...")
+    result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
+    if 'result' in result and 'outputs' in result['result']:
+        outputs = result['result']['outputs']
+        for idx, output in enumerate(outputs, 1):
+            image_url = output['image']['url']
+            output_filename = args.output.replace("{n}", str(idx))
+            print(f"Downloading filled image to {output_filename}...")
             download_file(image_url, output_filename, args.silent, args.debug)
     else:
         print("No outputs found in response.")

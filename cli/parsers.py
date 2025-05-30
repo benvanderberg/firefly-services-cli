@@ -73,6 +73,23 @@ def create_parser():
     expand_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
     expand_parser.add_argument('-ow', '--overwrite', action='store_true', help='Overwrite existing files')
 
+    # Fill image command
+    fill_parser = subparsers.add_parser('fill', help='Generative Fill an image using a mask')
+    fill_parser.add_argument('-i', '--input', required=True, help='Path to the input image file')
+    fill_parser.add_argument('-o', '--output', required=True, help='Output file path for the filled image')
+    fill_parser.add_argument('-m', '--mask', required=True, help='Path to the mask image file')
+    fill_parser.add_argument('-p', '--prompt', help='Prompt for the fill')
+    fill_parser.add_argument('-np', '--negative-prompt', help='Text describing what to avoid in the generation')
+    fill_parser.add_argument('-l', '--locale', help='Locale code for prompt biasing (e.g., en-US)')
+    fill_parser.add_argument('-n', '--numVariations', type=int, default=1, choices=range(1, 5), help='Number of variations (1-4, default: 1)')
+    fill_parser.add_argument('--mask-invert', action='store_true', help='Invert the mask')
+    fill_parser.add_argument('--height', type=int, help='Output height in pixels')
+    fill_parser.add_argument('--width', type=int, help='Output width in pixels')
+    fill_parser.add_argument('--seeds', type=int, nargs='+', help='Seed values for consistent generation (1-4 values)')
+    fill_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information')
+    fill_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
+    fill_parser.add_argument('-ow', '--overwrite', action='store_true', help='Overwrite existing files')
+
     # Text-to-speech command
     tts_parser = subparsers.add_parser('tts', aliases=['speech'], help='Generate text-to-speech')
     tts_parser.add_argument('-t', '--text', help='Text to convert to speech')

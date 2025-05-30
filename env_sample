@@ -1,0 +1,17 @@
+# Adobe Firefly Services API credentials
+# Get these from the Adobe Developer Console (https://developer.adobe.com/console)
+FIREFLY_SERVICES_CLIENT_ID=your_client_id_here
+FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret_here
+
+# Azure Storage configuration
+# Get these from your Azure Storage Account in the Azure Portal
+AZURE_STORAGE_ACCOUNT=your_storage_account_name  # The name of your storage account (without .blob.core.windows.net)
+AZURE_STORAGE_CONTAINER=your_container_name      # The name of the blob container to use
+AZURE_SAS_TOKEN=your_sas_token_here             # The SAS token for authentication (without the ? prefix)
+
+# Rate limiting configuration
+# Maximum number of image generation API calls per 60 seconds
+THROTTLE_LIMIT_FIREFLY=5
+
+# Storage type (currently only 'azure' is supported)
+STORAGE_TYPE=azure 

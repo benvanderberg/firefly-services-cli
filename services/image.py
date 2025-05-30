@@ -70,7 +70,7 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
         # Upload or resolve style_ref_path to a URL if needed
         style_url = style_ref_path
         if style_url.startswith('file://') or os.path.exists(style_url):
-            style_url = upload_to_azure_storage(style_url)
+            style_url = upload_to_azure_storage(style_url, debug=debug)
         data["styles"] = [{
             "imageReference": {
                 "source": {"url": style_url}
@@ -83,7 +83,7 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
         # Upload or resolve composition_ref_path to a URL if needed
         cref_url = composition_ref_path
         if cref_url.startswith('file://') or os.path.exists(cref_url):
-            cref_url = upload_to_azure_storage(cref_url)
+            cref_url = upload_to_azure_storage(cref_url, debug=debug)
         data["structure"] = {
             "imageReference": {
                 "source": {"url": cref_url}
@@ -324,6 +324,73 @@ def expand_image(
     url = "https://firefly-api.adobe.io/v3/images/expand-async"
     if debug:
         print("Expand payload:", json.dumps(payload, indent=2))
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.json()
+
+def fill_image(
+    access_token: str,
+    image_path: str,
+    mask_path: str,
+    prompt: Optional[str] = None,
+    negative_prompt: Optional[str] = None,
+    prompt_biasing_locale: Optional[str] = None,
+    num_variations: int = 1,
+    mask_invert: bool = False,
+    height: Optional[int] = None,
+    width: Optional[int] = None,
+    seeds: Optional[List[int]] = None,
+    debug: bool = False
+) -> dict:
+    """
+    Perform Generative Fill on an image using a mask.
+    
+    Args:
+        access_token (str): Adobe authentication token
+        image_path (str): Path to the input image file
+        mask_path (str): Path to the mask image file
+        prompt (str, optional): Text prompt for the fill
+        negative_prompt (str, optional): Text describing what to avoid in the generation
+        prompt_biasing_locale (str, optional): Locale code for prompt biasing
+        num_variations (int): Number of variations to generate (1-4)
+        mask_invert (bool): Whether to invert the mask
+        height (int, optional): Output height in pixels
+        width (int, optional): Output width in pixels
+        seeds (list, optional): List of seed values for consistent generation
+        debug (bool): Whether to show debug information
+    
+    Returns:
+        dict: Job information including status URL
+    """
+    image_url = upload_to_azure_storage(image_path)
+    mask_url = upload_to_azure_storage(mask_path)
+
+    payload = {
+        "image": {"source": {"url": image_url}},
+        "mask": {
+            "invert": mask_invert,
+            "source": {"url": mask_url}
+        },
+        "numVariations": num_variations
+    }
+
+    if prompt:
+        payload["prompt"] = prompt
+    if negative_prompt:
+        payload["negativePrompt"] = negative_prompt
+    if prompt_biasing_locale:
+        payload["promptBiasingLocaleCode"] = prompt_biasing_locale
+    if seeds:
+        payload["seeds"] = seeds
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "x-api-key": os.environ['FIREFLY_SERVICES_CLIENT_ID'],
+        "Content-Type": "application/json"
+    }
+    url = "https://firefly-api.adobe.io/v3/images/fill-async"
+    if debug:
+        print("Fill payload:", json.dumps(payload, indent=2))
     response = requests.post(url, headers=headers, json=payload)
     response.raise_for_status()
     return response.json() 
