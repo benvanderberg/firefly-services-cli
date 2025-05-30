@@ -14,7 +14,7 @@ from utils.storage import upload_to_azure_storage
 from utils.rate_limiter import RateLimiter
 from utils.filename import parse_size, parse_prompt_variations, get_variation_filename, get_unique_filename, replace_filename_tokens
 from services.image import generate_image, parse_model_variations, parse_style_ref_variations, generate_similar_image, expand_image, fill_image
-from services.speech import generate_speech, get_available_voices
+from services.speech import generate_speech, get_available_voices, parse_voice_variations, get_voice_id_by_name
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
 from config.settings import (
@@ -289,35 +289,173 @@ def handle_similar_image_command(args, access_token):
         print("\nAll similar image generation tasks completed.")
 
 def handle_tts_command(args, access_token):
-    """Handle the text-to-speech command."""
-    # Get text from either direct input or file
-    text = args.text if args.text is not None else read_text_file(args.file)
+    """Handle text-to-speech command"""
+    # Get text from file or direct input
+    text = get_text_from_file_or_input(args.text, args.file)
+    if not text:
+        print("Error: No text provided. Use -t for direct text or -f for a text file.")
+        return
+
+    # Parse voice variations
+    voice_ids = parse_voice_variations(args.voice_id) if args.voice_id else []
+    voice_names = parse_voice_variations(args.voice) if args.voice else []
+    voice_styles = parse_voice_variations(args.voice_style) if args.voice_style else []
+
+    # Validate input
+    if not voice_ids and not voice_names:
+        print("Error: Either --voice-id or --voice must be specified")
+        return
+
+    if voice_names and not voice_styles:
+        print("Error: --voice-style is required when using --voice")
+        return
+
+    # Create rate limiter for API calls using environment variable
+    throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
+    rate_limiter = RateLimiter(max_calls=throttle_limit, period=60)
+
+    # Prepare voice combinations
+    voice_combinations = []
     
-    # Generate speech
-    job_info = generate_speech(
-        access_token=access_token,
-        text=text,
-        voice_id=args.voice,
-        locale_code=args.locale,
-        debug=args.debug
-    )
+    # Add direct voice IDs
+    for voice_id in voice_ids:
+        voice_combinations.append({
+            'id': voice_id,
+            'name': voice_id,  # Use ID as name for direct voice IDs
+            'style': None
+        })
     
-    print(f"Job ID: {job_info['jobId']}")
-    print("Polling for job completion...")
-    
-    # Poll the status URL until the job is complete
-    result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
-    
-    # Download the generated audio
-    if result.get('status') == 'succeeded' and 'output' in result and 'url' in result['output']:
-        audio_url = result['output']['url']
-        print(f"Downloading audio to {args.output}...")
-        download_file(audio_url, args.output, args.silent, args.debug)
-    else:
-        print("Error: No output URL found in the response")
-        if args.debug:
-            print("Response:", result)
-        sys.exit(1)
+    # Add voice name + style combinations
+    for voice_name in voice_names:
+        for style in voice_styles:
+            voice_id = get_voice_id_by_name(access_token, voice_name, style)
+            if voice_id:
+                voice_combinations.append({
+                    'id': voice_id,
+                    'name': voice_name,
+                    'style': style
+                })
+            else:
+                print(f"Warning: No voice ID found for name '{voice_name}' with style '{style}'")
+
+    if not voice_combinations:
+        print("Error: No valid voice combinations found")
+        return
+
+    # Show progress table
+    print(f"\nGenerating {len(voice_combinations)} total variations:")
+    print(f"  • {len(voice_combinations)} voice combinations")
+    print(f"\nUsing parallel processing with rate limit of {throttle_limit} calls per minute\n")
+
+    # Print voice combinations
+    print("\nVoice Combinations:")
+    for i, combo in enumerate(voice_combinations, 1):
+        print(f"{i}. ID: {combo['id']}, Name: {combo['name']}, Style: {combo['style']}")
+
+    # Create tasks for parallel processing
+    tasks = []
+    for combo in voice_combinations:
+        def tts_task(voice_combo):
+            try:
+                # Generate speech
+                if args.debug:
+                    print(f"\nGenerating speech with voice: {voice_combo['id']} ({voice_combo['name']} - {voice_combo['style']})")
+                
+                # Create tokens for filename
+                tokens = {
+                    'date': datetime.now().strftime('%Y-%m-%d'),
+                    'time': datetime.now().strftime('%H-%M-%S'),
+                    'datetime': datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
+                    'voice_id': voice_combo['id'],
+                    'voice_name': voice_combo['name'],
+                    'voice_style': voice_combo['style'] or '',
+                    'locale_code': args.locale
+                }
+                
+                # Replace tokens in output path
+                output_path = args.output.format(**tokens)
+                if args.debug:
+                    print(f"Original output path: {args.output}")
+                    print(f"Tokens: {tokens}")
+                    print(f"Replaced output path: {output_path}")
+                
+                # Generate speech
+                response = generate_speech(
+                    access_token=access_token,
+                    text=text,
+                    voice_id=voice_combo['id'],
+                    locale_code=args.locale,
+                    debug=args.debug
+                )
+                
+                if response and 'jobId' in response and 'statusUrl' in response:
+                    if args.debug:
+                        print(f"Job ID: {response['jobId']}")
+                        print("Polling for job completion...")
+                    
+                    # Poll the status URL until the job is complete
+                    result = check_job_status(response['statusUrl'], access_token, args.silent, args.debug)
+                    
+                    if result.get('status') == 'succeeded' and 'output' in result and 'url' in result['output']:
+                        # Download the audio file
+                        audio_url = result['output']['url']
+                        if args.debug:
+                            print(f"Downloading audio to {output_path}...")
+                            print(f"Audio URL: {audio_url}")
+                        
+                        # Create output directory if it doesn't exist
+                        output_dir = os.path.dirname(output_path)
+                        if output_dir:
+                            os.makedirs(output_dir, exist_ok=True)
+                            if args.debug:
+                                print(f"Created output directory: {output_dir}")
+                        
+                        # Download the file
+                        try:
+                            if args.debug:
+                                print(f"Making request to download file from {audio_url}")
+                            response = requests.get(audio_url, stream=True)
+                            response.raise_for_status()
+                            
+                            if args.debug:
+                                print(f"Response status: {response.status_code}")
+                                print(f"Response headers: {response.headers}")
+                            
+                            with open(output_path, 'wb') as f:
+                                for chunk in response.iter_content(chunk_size=8192):
+                                    if chunk:
+                                        f.write(chunk)
+                            
+                            if args.debug:
+                                print(f"Successfully downloaded to {output_path}")
+                                print(f"File size: {os.path.getsize(output_path)} bytes")
+                            return True
+                        except Exception as e:
+                            print(f"Error downloading file for {voice_combo['name']}: {str(e)}")
+                            if args.debug:
+                                import traceback
+                                traceback.print_exc()
+                            return False
+                    else:
+                        if args.debug:
+                            print("No output URL found in result")
+                            print(f"Result: {result}")
+                return False
+            except Exception as e:
+                print(f"Error generating speech for {voice_combo['name']}: {str(e)}")
+                if args.debug:
+                    import traceback
+                    traceback.print_exc()
+                return False
+
+        tasks.append((tts_task, combo))
+
+    # Process tasks in parallel with rate limiting
+    results = process_tasks_parallel(tasks, rate_limiter)
+
+    # Print summary
+    success_count = sum(1 for r in results if r)
+    print(f"\nCompleted {success_count} of {len(tasks)} variations successfully")
 
 def handle_dub_command(args, access_token):
     """Handle the dubbing command."""
@@ -584,6 +722,17 @@ def download_file(url, output_file, silent=False, debug=False):
         debug (bool): Whether to show debug information
     """
     try:
+        # Create output directory if it doesn't exist
+        output_dir = os.path.dirname(output_file)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            if debug:
+                print(f"Created output directory: {output_dir}")
+
+        # Download the file
+        if debug:
+            print(f"Downloading from {url} to {output_file}")
+        
         response = requests.get(url, stream=True)
         response.raise_for_status()
         
@@ -591,11 +740,16 @@ def download_file(url, output_file, silent=False, debug=False):
             for chunk in response.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
+        
         if debug:
-            print(f"File successfully downloaded to {output_file}")
+            print(f"Successfully downloaded to {output_file}")
+        return True
     except Exception as e:
         print(f"Error downloading file: {str(e)}")
-        sys.exit(1)
+        if debug:
+            import traceback
+            traceback.print_exc()
+        return False
 
 def read_text_file(file_path):
     """
@@ -623,4 +777,48 @@ def read_text_file(file_path):
     except FileNotFoundError:
         raise FileNotFoundError(f"Text file not found: {file_path}")
     except Exception as e:
-        raise Exception(f"Error reading text file: {str(e)}") 
+        raise Exception(f"Error reading text file: {str(e)}")
+
+def get_text_from_file_or_input(text, file_path):
+    """
+    Get text from either direct input or a file.
+    
+    Args:
+        text (str): Direct text input
+        file_path (str): Path to text file
+    
+    Returns:
+        str: The text content, or None if no text is provided
+    """
+    if text:
+        return text
+    elif file_path:
+        try:
+            return read_text_file(file_path)
+        except Exception as e:
+            print(f"Error reading text file: {str(e)}")
+            return None
+    return None
+
+def process_tasks_parallel(tasks, rate_limiter):
+    """
+    Process tasks in parallel with rate limiting.
+    
+    Args:
+        tasks (list): List of (task_function, task_args) tuples
+        rate_limiter (RateLimiter): Rate limiter instance
+    
+    Returns:
+        list: Results from all tasks
+    """
+    results = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        futures = []
+        for task_func, task_args in tasks:
+            rate_limiter.acquire()
+            futures.append(executor.submit(task_func, task_args))
+        
+        for future in concurrent.futures.as_completed(futures):
+            results.append(future.result())
+    
+    return results 

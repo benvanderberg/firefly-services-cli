@@ -28,6 +28,50 @@ def get_available_voices(access_token):
         
     return voices_data['voices']
 
+def parse_voice_variations(voice_input, debug=False):
+    """
+    Parse voice variations from input string.
+    
+    Args:
+        voice_input (str): Voice input string in [value1,value2,...] format
+        debug (bool): Whether to print debug information
+    
+    Returns:
+        list: List of voice values
+    """
+    if not voice_input:
+        return []
+        
+    # Remove brackets and split by comma
+    if voice_input.startswith('[') and voice_input.endswith(']'):
+        voice_input = voice_input[1:-1]
+    
+    voices = [v.strip() for v in voice_input.split(',')]
+    
+    if debug:
+        print(f"Parsed voice variations: {voices}")
+    
+    return voices
+
+def get_voice_id_by_name(access_token, voice_name, voice_style=None):
+    """
+    Get the voice ID for a given voice name and style.
+    
+    Args:
+        access_token (str): The authentication token
+        voice_name (str): The name of the voice to look up
+        voice_style (str): The style of the voice (Casual or Happy)
+    
+    Returns:
+        str: The voice ID if found, None otherwise
+    """
+    voices = get_available_voices(access_token)
+    for voice in voices:
+        if (voice.get('displayName', '').lower() == voice_name.lower() and 
+            (voice_style is None or voice.get('style', '') == voice_style)):
+            return voice.get('voiceId')
+    return None
+
 def generate_speech(access_token, text, voice_id, locale_code="en-US", debug=False):
     """
     Generate speech from text using the specified voice.
@@ -57,7 +101,7 @@ def generate_speech(access_token, text, voice_id, locale_code="en-US", debug=Fal
         },
         'voiceId': voice_id,
         'output': {
-            'mediaType': 'audio/wav'
+            'mediaType': 'audio/mp3'
         }
     }
 
