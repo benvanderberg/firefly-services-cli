@@ -153,6 +153,43 @@ Options:
 - `-o, --output`: Output file path
 - `-d, --debug`: Enable debug output
 
+#### Prompt Variations
+You can include multiple options in your prompt using square brackets with comma-separated values. The CLI will generate all possible combinations of these variations.
+
+Example:
+```bash
+ff image -p "a [cat,dog] in a [garden,forest]" -o output_{var1}_{var2}.jpg
+```
+
+This will generate 4 different images:
+1. "a cat in a garden"
+2. "a cat in a forest"
+3. "a dog in a garden"
+4. "a dog in a forest"
+
+The variations will be reflected in the output filenames using the `{var1}`, `{var2}`, etc. tokens. You can use this syntax in any command that accepts a prompt, including image generation, expansion, and fill commands.
+
+#### Model Variations
+You can specify multiple model versions to generate images using different models. Use square brackets with comma-separated model names.
+
+Example:
+```bash
+ff image -p "a cat in a garden" -m "[image3,image4_ultra]" -o output_{model}.jpg
+```
+
+This will generate 2 different images:
+1. Using the Image 3 model
+2. Using the Image 4 Ultra model
+
+Available model versions:
+- `image3`: Standard Image 3 model
+- `image4`: Standard Image 4 model
+- `image4_standard`: Standard Image 4 model (alias for image4)
+- `image4_ultra`: Ultra Image 4 model
+- `ultra`: Ultra Image 4 model (alias for image4_ultra)
+
+The model version will be reflected in the output filename using the `{model}` token. You can combine model variations with prompt variations to generate images with all possible combinations.
+
 ### Text-to-Speech
 Convert text to speech using various voices and styles.
 
