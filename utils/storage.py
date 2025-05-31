@@ -5,6 +5,7 @@ from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPerm
 from urllib.parse import urlparse, parse_qs
 from azure.core.exceptions import AzureError
 import time
+from tqdm import tqdm
 
 def upload_to_azure_storage(file_path, debug=False):
     """
@@ -93,14 +94,19 @@ def upload_to_azure_storage(file_path, debug=False):
             # Create a blob client
             blob_client = container_client.get_blob_client(file_name)
             
-            # Upload the file
+            # Upload the file with progress bar
             with open(file_path, "rb") as data:
-                blob_client.upload_blob(
-                    data,
-                    overwrite=True,
-                    content_type=content_type,
-                    timeout=timeout
-                )
+                # Create progress bar
+                with tqdm(total=file_size, unit='B', unit_scale=True, desc=f"Uploading {file_name}") as pbar:
+                    # Upload in chunks and update progress bar
+                    blob_client.upload_blob(
+                        data,
+                        overwrite=True,
+                        content_type=content_type,
+                        timeout=timeout,
+                        max_concurrency=1,  # Ensure sequential upload for accurate progress
+                        progress_hook=lambda current, total: pbar.update(current - pbar.n)
+                    )
             
             if debug:
                 print("Blob uploaded successfully")

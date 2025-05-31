@@ -133,6 +133,8 @@ def create_parser():
                                 help='Generate SRT captions')
     transcribe_parser.add_argument('-text', '--text-only', action='store_true',
                                 help='Output only the transcript text without timestamps')
+    transcribe_parser.add_argument('--output-type', choices=['text', 'markdown', 'pdf'], default='text',
+                                help='Output format (text, markdown, or pdf)')
     transcribe_parser.add_argument('-d', '--debug', action='store_true',
                                 help='Show debug information including full HTTP request details')
     transcribe_parser.add_argument('-silent', '--silent', action='store_true',
