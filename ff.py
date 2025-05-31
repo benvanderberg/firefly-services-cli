@@ -1,4 +1,4 @@
-#!/Users/bvanderb/Documents/GitHub/firefly-services-cli-github/venv/bin/python3
+#!/usr/bin/env python3
 
 import sys
 from cli.parsers import create_parser

@@ -91,6 +91,51 @@ FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret
 THROTTLE_LIMIT_FIREFLY=5  # Optional: Set API rate limit (default: 5 calls per minute)
 ```
 
+## Configuration
+
+Create a `.env` file in the project root with the following variables:
+
+```bash
+FIREFLY_SERVICES_CLIENT_ID=your_client_id
+FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret
+```
+
+## Azure Storage Configuration
+
+The CLI uses Azure Blob Storage to temporarily store files that need to be referenced by the Firefly Services API. This is necessary because the API requires files to be accessible via a URL. The CLI uploads files to Azure Storage and then uses the resulting URLs in API calls.
+
+To configure Azure Storage, add the following variables to your `.env` file:
+
+```bash
+AZURE_STORAGE_ACCOUNT=your_storage_account
+AZURE_STORAGE_CONTAINER=your_container_name
+AZURE_STORAGE_SAS_TOKEN=your_sas_token
+```
+
+### Getting a SAS Token
+
+A SAS (Shared Access Signature) token is required to securely upload files to Azure Storage. Here's how to get one:
+
+1. Go to the Azure Portal (https://portal.azure.com)
+2. Navigate to your Storage Account
+3. In the left menu, under "Security + networking", click on "Shared access signature"
+4. Configure the following settings:
+   - Allowed services: Blob
+   - Allowed resource types: Container, Object
+   - Allowed permissions: Read, Write, Delete, List
+   - Start time: Current time
+   - End time: Choose a future date (e.g., 1 year from now)
+   - Allowed protocols: HTTPS only
+5. Click "Generate SAS and connection string"
+6. Copy the "SAS token" value (it starts with "?sv=")
+7. Add it to your `.env` file as `AZURE_STORAGE_SAS_TOKEN`
+
+The SAS token is used to:
+- Securely upload input files (images, audio, video) to Azure Storage
+- Make these files accessible to the Firefly Services API
+- Allow the API to process files that are too large to be sent directly
+- Enable processing of files that need to be referenced multiple times
+
 ## Usage
 
 ### Image Generation
