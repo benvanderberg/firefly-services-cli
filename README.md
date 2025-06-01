@@ -2,6 +2,59 @@
 
 A command-line interface for Adobe Firefly Services, providing easy access to image generation, text-to-speech, dubbing, and transcription capabilities.
 
+## Quick Installation
+
+The easiest way to install the Firefly Services CLI is using the provided installation script:
+
+```bash
+# Make the install script executable
+chmod +x install.sh
+
+# Run the installation script
+./install.sh
+```
+
+The installation script will:
+1. Check for Python 3 installation
+2. Create and activate a virtual environment
+3. Install all required dependencies
+4. Set up your environment file
+5. Provide instructions for making the `ff` command available system-wide
+
+## Manual Installation
+
+If you prefer to install manually, follow these steps:
+
+1. Ensure you have Python 3 installed
+2. Create and activate a virtual environment:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+3. Install the required dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Copy the environment sample file and update it with your credentials:
+   ```bash
+   cp env_sample .env
+   # Edit .env with your credentials
+   ```
+
+## Usage
+
+After installation, you can use the CLI tool in two ways:
+
+1. Using the full path:
+   ```bash
+   ./bin/ff [command] [options]
+   ```
+
+2. If you've added the bin directory to your PATH (as suggested during installation):
+   ```bash
+   ff [command] [options]
+   ```
+
 ## Features
 
 ### Image Generation
@@ -34,62 +87,6 @@ A command-line interface for Adobe Firefly Services, providing easy access to im
 - Support for multiple languages
 - Optional SRT caption generation
 - Text-only output option
-
-## Installation
-
-### Prerequisites
-- Python 3.8 or higher
-- pip (Python package installer)
-
-### Mac Installation
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/firefly-services-cli.git
-cd firefly-services-cli
-```
-
-2. Create and activate a virtual environment (recommended):
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Create a `.env` file in the project root with your Adobe credentials:
-```bash
-FIREFLY_SERVICES_CLIENT_ID=your_client_id
-FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret
-THROTTLE_LIMIT_FIREFLY=5  # Optional: Set API rate limit (default: 5 calls per minute)
-```
-
-### Windows Installation
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/firefly-services-cli.git
-cd firefly-services-cli
-```
-
-2. Create and activate a virtual environment (recommended):
-```bash
-python -m venv venv
-.\venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-4. Create a `.env` file in the project root with your Adobe credentials:
-```bash
-FIREFLY_SERVICES_CLIENT_ID=your_client_id
-FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret
-THROTTLE_LIMIT_FIREFLY=5  # Optional: Set API rate limit (default: 5 calls per minute)
-```
 
 ## Configuration
 

@@ -546,8 +546,7 @@ def handle_transcribe_command(args, access_token):
             sys.exit(1)
         
         # Get access token
-        access_token = retrieve_access_token()
-        print("Access Token Retrieved")
+        access_token = retrieve_access_token(debug=args.debug)
         
         # Upload file to Azure Storage
         print(f"Uploading file to Azure Storage: {args.input}")

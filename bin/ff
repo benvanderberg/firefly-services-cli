@@ -1,0 +1,18 @@
+#!/bin/bash
+
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_ROOT="$( cd "$SCRIPT_DIR/.." && pwd )"
+
+# Use the Python interpreter from the virtual environment
+PYTHON_PATH="$PROJECT_ROOT/venv/bin/python3"
+
+# Check if the Python interpreter exists
+if [ ! -f "$PYTHON_PATH" ]; then
+    echo "Error: Python interpreter not found in virtual environment"
+    echo "Please ensure you have activated the virtual environment and installed dependencies"
+    exit 1
+fi
+
+# Pass through all arguments to main.py
+"$PYTHON_PATH" "$PROJECT_ROOT/main.py" "$@" 
