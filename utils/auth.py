@@ -3,13 +3,14 @@ import sys
 import requests
 from dotenv import load_dotenv
 
-def retrieve_access_token(silent=False):
+def retrieve_access_token(silent=False, debug=False):
     """
     Retrieve an access token from Adobe's authentication service.
     Uses client credentials from environment variables or .env file.
     
     Args:
         silent (bool): Whether to suppress output messages
+        debug (bool): Whether to show debug information
     
     Returns:
         str: The access token for API authentication
@@ -34,6 +35,6 @@ def retrieve_access_token(silent=False):
     response = requests.post(token_url, data=payload)
     response.raise_for_status()
     token_data = response.json()
-    if not silent:
+    if debug:
         print("Access Token Retrieved")
     return token_data['access_token'] 
