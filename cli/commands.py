@@ -297,6 +297,20 @@ def handle_tts_command(args, access_token):
         print("Error: No text provided. Use -t for direct text or -f for a text file.")
         return
 
+    # If input is a Markdown file, save the converted text to a .txt file
+    if args.file and args.file.lower().endswith('.md'):
+        txt_file = os.path.splitext(args.file)[0] + '.txt'
+        try:
+            with open(txt_file, 'w', encoding='utf-8') as f:
+                f.write(text)
+            if args.debug:
+                print(f"Converted Markdown to text and saved to: {txt_file}")
+            # Update the file path to use the converted text file
+            args.file = txt_file
+        except Exception as e:
+            print(f"Error saving converted text file: {str(e)}")
+            return
+
     # Parse voice variations
     voice_ids = parse_voice_variations(args.voice_id) if args.voice_id else []
     voice_names = parse_voice_variations(args.voice) if args.voice else []
@@ -367,62 +381,47 @@ def handle_tts_command(args, access_token):
                 print(f"  Length: {len(p)} characters")
                 print(f"  Preview: {p[:100] + '...' if len(p) > 100 else p}")
         
-        # Process each paragraph to handle incomplete sentences and long paragraphs
-        for para_num, para in enumerate(raw_paragraphs, 1):
-            # Skip paragraphs that are just numbers or references
-            if para.strip('[]()').isdigit():
+        # Process each paragraph
+        i = 0
+        while i < len(raw_paragraphs):
+            para = raw_paragraphs[i]
+            para_num = i + 1
+            
+            # If paragraph is too short and not the last one, combine with next paragraph
+            if len(para) < 15 and i < len(raw_paragraphs) - 1:
                 if args.debug:
-                    print(f"Skipping paragraph {para_num} as it's just a reference number")
-                continue
+                    print(f"\nCombining short paragraph {para_num} with next paragraph")
+                next_para = raw_paragraphs[i + 1]
+                combined_para = f"{para} {next_para}"
+                if args.debug:
+                    print(f"  Combined length: {len(combined_para)} characters")
+                    print(f"  Preview: {combined_para[:100] + '...' if len(combined_para) > 100 else combined_para}")
+                para = combined_para
+                i += 1  # Skip the next paragraph since we combined it
+            
+            # Split long paragraphs into sentences if they exceed 1000 characters
+            if len(para) > 1000:
+                # Split into sentences (basic split on period + space)
+                sentences = re.split(r'(?<=[.!?])\s+', para)
+                sentences = [s.strip() for s in sentences if s.strip()]
                 
-            # Split into sentences using regex to handle various sentence endings
-            import re
-            sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', para)
-            sentences = [s.strip() for s in sentences if s.strip()]
-            
-            # Skip incomplete sentences
-            sentences = [s for s in sentences if not s.endswith('wa.')]
-            
-            # Combine short sentences (less than 15 chars) with the next sentence
-            combined_sentences = []
-            i = 0
-            while i < len(sentences):
-                current = sentences[i]
-                if len(current) < 15 and i + 1 < len(sentences):
-                    # Combine with next sentence
-                    next_sentence = sentences[i + 1]
-                    combined = f"{current} {next_sentence}"
-                    combined_sentences.append(combined)
-                    i += 2
-                else:
-                    combined_sentences.append(current)
-                    i += 1
-            
-            sentences = combined_sentences
-            
-            if args.debug:
-                print(f"\nProcessing paragraph {para_num}:")
-                print(f"  Found {len(sentences)} sentences after combining short ones")
-                print(f"  Length: {len(para)} characters")
-                for i, s in enumerate(sentences, 1):
-                    print(f"  Sentence {i}: {s[:50]}{'...' if len(s) > 50 else ''}")
-            
-            # If paragraph is too long, split it into sentences
-            if len(para) > 500:
-                # Add each sentence as a separate paragraph
-                for i, sentence in enumerate(sentences, 1):
-                    if len(sentence) > 50:  # Only include sentences longer than 50 chars
+                if args.debug:
+                    print(f"\nSplitting paragraph {para_num} into {len(sentences)} sentences")
+                
+                # Add each sentence as a separate paragraph if it's long enough
+                for j, sentence in enumerate(sentences, 1):
+                    if len(sentence) >= 15:  # Only include sentences longer than 15 chars
                         paragraphs.append(sentence)
                         paragraph_info.append({
                             'para_num': para_num,
                             'total_paras': len(raw_paragraphs),
-                            'sentence_num': i,
+                            'sentence_num': j,
                             'total_sentences': len(sentences),
                             'char_count': len(sentence),
                             'is_split': True
                         })
                         if args.debug:
-                            print(f"  Split sentence {i}: {sentence[:50]}...")
+                            print(f"  Split sentence {j}: {sentence[:50]}...")
             else:
                 # Add the paragraph as is if it's not too long
                 paragraphs.append(para)
@@ -430,12 +429,14 @@ def handle_tts_command(args, access_token):
                     'para_num': para_num,
                     'total_paras': len(raw_paragraphs),
                     'sentence_num': 1,
-                    'total_sentences': len(sentences),
+                    'total_sentences': 1,
                     'char_count': len(para),
                     'is_split': False
                 })
                 if args.debug:
                     print(f"  Keeping as single paragraph: {para[:50]}...")
+            
+            i += 1
         
         if args.debug:
             print(f"\nFinal split into {len(paragraphs)} segments:")
@@ -447,15 +448,20 @@ def handle_tts_command(args, access_token):
                 print(f"  Split from longer paragraph: {info['is_split']}")
                 print(f"  Preview: {p[:100] + '...' if len(p) > 100 else p}")
     else:
-        paragraphs = [text]
-        paragraph_info = [{
-            'para_num': 1,
-            'total_paras': 1,
-            'sentence_num': 1,
-            'total_sentences': 1,
-            'char_count': len(text),
-            'is_split': False
-        }]
+        # For non-split text, only process if it's long enough
+        if len(text) >= 15:
+            paragraphs = [text]
+            paragraph_info = [{
+                'para_num': 1,
+                'total_paras': 1,
+                'sentence_num': 1,
+                'total_sentences': 1,
+                'char_count': len(text),
+                'is_split': False
+            }]
+        else:
+            print("Error: Input text must be at least 15 characters long")
+            return
 
     # Create tasks for parallel processing
     tasks = []
@@ -497,6 +503,13 @@ def handle_tts_command(args, access_token):
                         print(f"Tokens: {tokens}")
                         print(f"Replaced output path: {output_path}")
                     
+                    # Create output directory if it doesn't exist
+                    output_dir = os.path.dirname(output_path)
+                    if output_dir:
+                        os.makedirs(output_dir, exist_ok=True)
+                        if args.debug:
+                            print(f"Created output directory: {output_dir}")
+                    
                     # Generate speech
                     response = generate_speech(
                         access_token=access_token,
@@ -517,16 +530,6 @@ def handle_tts_command(args, access_token):
                         if result.get('status') == 'succeeded' and 'output' in result and 'url' in result['output']:
                             # Download the audio file
                             audio_url = result['output']['url']
-                            if args.debug:
-                                print(f"Downloading audio to {output_path}...")
-                                print(f"Audio URL: {audio_url}")
-                            
-                            # Create output directory if it doesn't exist
-                            output_dir = os.path.dirname(output_path)
-                            if output_dir:
-                                os.makedirs(output_dir, exist_ok=True)
-                                if args.debug:
-                                    print(f"Created output directory: {output_dir}")
                             
                             # Download the file
                             try:
@@ -976,6 +979,7 @@ def download_file(url, output_file, silent=False, debug=False):
 def read_text_file(file_path):
     """
     Read text from a file and preserve paragraph structure.
+    If the file is a Markdown file, convert it to plain text by removing Markdown syntax.
     
     Args:
         file_path (str): Path to the text file
@@ -993,6 +997,33 @@ def read_text_file(file_path):
             content = f.read()
             # Normalize all line endings to \n
             content = content.replace('\r\n', '\n').replace('\r', '\n')
+            
+            # If it's a Markdown file, convert to plain text
+            if file_path.lower().endswith('.md'):
+                # Remove Markdown headers
+                content = re.sub(r'^#+\s+', '', content, flags=re.MULTILINE)
+                # Remove bold/italic markers
+                content = re.sub(r'[*_]{1,2}(.*?)[*_]{1,2}', r'\1', content)
+                # Remove code blocks
+                content = re.sub(r'```.*?```', '', content, flags=re.DOTALL)
+                # Remove inline code
+                content = re.sub(r'`(.*?)`', r'\1', content)
+                # Remove links
+                content = re.sub(r'\[(.*?)\]\(.*?\)', r'\1', content)
+                # Remove horizontal rules
+                content = re.sub(r'^[-*_]{3,}$', '', content, flags=re.MULTILINE)
+                # Remove blockquotes
+                content = re.sub(r'^>\s+', '', content, flags=re.MULTILINE)
+                # Remove list markers
+                content = re.sub(r'^[-*+]\s+', '', content, flags=re.MULTILINE)
+                content = re.sub(r'^\d+\.\s+', '', content, flags=re.MULTILINE)
+                # Remove HTML tags
+                content = re.sub(r'<[^>]+>', '', content)
+                # Remove multiple blank lines
+                content = re.sub(r'\n{3,}', '\n\n', content)
+                # Remove leading/trailing whitespace from each line
+                content = '\n'.join(line.strip() for line in content.split('\n'))
+            
             # Ensure paragraphs are separated by exactly two newlines
             content = re.sub(r'\n{3,}', '\n\n', content)
             return content.strip()
