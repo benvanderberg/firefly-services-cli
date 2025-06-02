@@ -863,6 +863,9 @@ def handle_expand_command(args, access_token):
 
 def handle_fill_command(args, access_token):
     """Handle the Generative Fill command."""
+    import subprocess
+    import os.path
+    
     # Validate numVariations
     if not 1 <= args.numVariations <= 4:
         print("Error: Number of variations (-n) must be between 1 and 4")
@@ -873,16 +876,45 @@ def handle_fill_command(args, access_token):
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    # Invert the mask if --mask-invert is set
+    if args.mask_invert:
+        if args.debug:
+            print(f"Inverting mask: {args.mask}")
+        
+        # Get the original filename without path
+        original_filename = os.path.basename(args.mask)
+        # Create path in /tmp with same filename
+        inverted_mask_path = os.path.join('/tmp', original_filename)
+        
+        try:
+            # Run ImageMagick convert command
+            result = subprocess.run(['convert', args.mask, '-negate', inverted_mask_path], 
+                                 check=True, 
+                                 capture_output=True, 
+                                 text=True)
+            if args.debug:
+                print(f"ImageMagick output: {result.stdout}")
+                print(f"Inverted mask saved to: {inverted_mask_path}")
+            mask_path = inverted_mask_path
+        except subprocess.CalledProcessError as e:
+            print(f"Error inverting mask: {e.stderr}")
+            sys.exit(1)
+    else:
+        mask_path = args.mask
+
+    if args.debug:
+        print(f"Using mask path: {mask_path}")
+
     # Call fill_image
     job_info = fill_image(
         access_token=access_token,
         image_path=args.input,
-        mask_path=args.mask,
+        mask_path=mask_path,  # Use the inverted mask if --mask-invert was set
         prompt=args.prompt,
         negative_prompt=args.negative_prompt,
         prompt_biasing_locale=args.locale,
         num_variations=args.numVariations,
-        mask_invert=args.mask_invert,
+        mask_invert=False,  # We've already inverted the mask if needed
         height=args.height,
         width=args.width,
         seeds=args.seeds,
