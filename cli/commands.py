@@ -1029,11 +1029,23 @@ def handle_replace_bg_command(args, access_token):
     """Handle the replace background command."""
     import tempfile
     import subprocess
-    from utils.filename import get_unique_filename
+    from utils.filename import get_unique_filename, parse_prompt_variations
 
     if not args.silent:
         print(f"Processing image: {args.input}")
-        print(f"New background prompt: {args.prompt}")
+
+    # Parse prompt variations
+    prompts, variation_blocks = parse_prompt_variations(args.prompt)
+    total_variations = len(prompts)
+
+    # Get throttle limit from environment
+    throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
+    rate_limiter = RateLimiter(throttle_limit, 60)
+
+    if not args.silent:
+        print(f'Generating {total_variations} total variations:')
+        print(f'  • {total_variations} prompt variations')
+        print(f'Using parallel processing with rate limit of {throttle_limit} calls per minute\n')
 
     # Create temporary directory for mask files
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -1061,44 +1073,70 @@ def handle_replace_bg_command(args, access_token):
             print(f"Error inverting mask: {str(e)}")
             sys.exit(1)
 
-        # Step 3: Use fill command with the local inverted mask file
-        if not args.silent:
-            print("Generating new background...")
-        fill_result = fill_image(
-            access_token=access_token,
-            image_path=args.input,
-            mask_path=inverted_mask_path,
-            prompt=args.prompt,
-            num_variations=1,
-            mask_invert=True,
-            debug=args.debug
-        )
+        def replace_bg_task(prompt, index):
+            rate_limiter.acquire()
+            # Use the output pattern with {var1} directly
+            output_filename = args.output.replace("{var1}", str(index + 1))
+            output_filename = get_unique_filename(output_filename, args.overwrite, args.debug)
 
-        if not fill_result:
-            print("Failed to generate new background")
-            sys.exit(1)
+            if not args.silent:
+                print(f"Generating new background with prompt: {prompt}")
+            
+            fill_result = fill_image(
+                access_token=access_token,
+                image_path=args.input,
+                mask_path=inverted_mask_path,
+                prompt=prompt,
+                num_variations=1,
+                mask_invert=True,
+                debug=args.debug
+            )
 
-        # Poll for job completion
-        print(f"Job ID: {fill_result['jobId']}")
-        print("Polling for job completion...")
-        result = check_job_status(fill_result['statusUrl'], access_token, args.silent, args.debug)
+            if not fill_result:
+                print(f"Failed to generate new background for prompt: {prompt}")
+                return False
 
-        if 'result' in result and 'outputs' in result['result']:
-            outputs = result['result']['outputs']
-            if outputs:
-                # Step 4: Save the result
-                output_filename = get_unique_filename(args.output, args.overwrite, args.debug)
-                if not args.silent:
-                    print(f"Saving result to: {output_filename}")
-                download_file(outputs[0]['image']['url'], output_filename, args.silent, args.debug)
+            # Poll for job completion
+            if args.debug:
+                print(f"Job ID: {fill_result['jobId']}")
+                print("Polling for job completion...")
+            result = check_job_status(fill_result['statusUrl'], access_token, args.silent, args.debug)
+
+            if 'result' in result and 'outputs' in result['result']:
+                outputs = result['result']['outputs']
+                if outputs:
+                    if not args.silent:
+                        print(f"Saving result to: {output_filename}")
+                    download_file(outputs[0]['image']['url'], output_filename, args.silent, args.debug)
+                    return True
+                else:
+                    print(f"No outputs found in response for prompt: {prompt}")
+                    return False
             else:
-                print("No outputs found in response")
-        else:
-            print("Failed to get result from job")
-            sys.exit(1)
+                print(f"Failed to get result from job for prompt: {prompt}")
+                return False
+
+        # Create tasks for parallel processing
+        tasks = []
+        current_generation = 0
+
+        # Prepare the table header
+        if not args.silent:
+            print("Generation Tasks:")
+            print(f"{'#':<4} {'Prompt':<40}")
+            print("-" * 45)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=throttle_limit) as executor:
+            for i, prompt in enumerate(prompts):
+                current_generation += 1
+                if not args.silent:
+                    print(f"{current_generation:<4} {prompt[:40]:<40}")
+                tasks.append(executor.submit(replace_bg_task, prompt, i))
+            for future in concurrent.futures.as_completed(tasks):
+                future.result()
 
     if not args.silent:
-        print("Background replacement completed successfully")
+        print("\nAll background replacement tasks completed.")
 
 def check_job_status(status_url, access_token, silent=False, debug=False):
     """
