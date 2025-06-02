@@ -878,6 +878,20 @@ def handle_fill_command(args, access_token):
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    # Parse prompt variations
+    prompts, variation_blocks = parse_prompt_variations(args.prompt)
+    total_variations = len(prompts)
+
+    # Get throttle limit from environment
+    throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
+    rate_limiter = RateLimiter(throttle_limit, 60)
+
+    if not args.silent:
+        print(f'Generating {total_variations} total variations:')
+        print(f'  • {total_variations} prompt variations')
+        print(f'  • {args.numVariations} variations per prompt')
+        print(f'Using parallel processing with rate limit of {throttle_limit} calls per minute\n')
+
     # Invert the mask if --mask-invert is set
     if args.mask_invert:
         if args.debug:
@@ -907,33 +921,72 @@ def handle_fill_command(args, access_token):
     if args.debug:
         print(f"Using mask path: {mask_path}")
 
-    # Call fill_image
-    job_info = fill_image(
-        access_token=access_token,
-        image_path=args.input,
-        mask_path=mask_path,  # Use the inverted mask if --mask-invert was set
-        prompt=args.prompt,
-        negative_prompt=args.negative_prompt,
-        prompt_biasing_locale=args.locale,
-        num_variations=args.numVariations,
-        mask_invert=False,  # We've already inverted the mask if needed
-        height=args.height,
-        width=args.width,
-        seeds=args.seeds,
-        debug=args.debug
-    )
-    print(f"Job ID: {job_info['jobId']}")
-    print("Polling for job completion...")
-    result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
-    if 'result' in result and 'outputs' in result['result']:
-        outputs = result['result']['outputs']
-        for idx, output in enumerate(outputs, 1):
-            image_url = output['image']['url']
-            output_filename = args.output.replace("{n}", str(idx))
-            print(f"Downloading filled image to {output_filename}...")
-            download_file(image_url, output_filename, args.silent, args.debug)
-    else:
-        print("No outputs found in response.")
+    def fill_task(prompt, j):
+        rate_limiter.acquire()
+        tokens = {
+            'prompt': prompt,
+            'seeds': args.seeds,
+            'iteration': j + 1
+        }
+        base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens, args.debug)
+        output_filename = get_unique_filename(base_filename, args.overwrite, args.debug)
+        try:
+            job_info = fill_image(
+                access_token=access_token,
+                image_path=args.input,
+                mask_path=mask_path,
+                prompt=prompt,
+                negative_prompt=args.negative_prompt,
+                prompt_biasing_locale=args.locale,
+                num_variations=1,
+                mask_invert=False,  # We've already inverted the mask if needed
+                height=args.height,
+                width=args.width,
+                seeds=args.seeds,
+                debug=args.debug
+            )
+            if args.debug:
+                print(f"Job ID: {job_info['jobId']}")
+                print("Polling for job completion...")
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
+            if 'result' in result and 'outputs' in result['result']:
+                outputs = result['result']['outputs']
+                if outputs:
+                    image_url = outputs[0]['image']['url']
+                    if args.debug:
+                        print(f"Downloading image to {output_filename}...")
+                    download_file(image_url, output_filename, args.silent, args.debug)
+                    return True
+            return False
+        except Exception as e:
+            print(f"Error generating fill: {str(e)}")
+            if args.debug:
+                import traceback
+                traceback.print_exc()
+            return False
+
+    # Create tasks for parallel processing
+    tasks = []
+    current_generation = 0
+
+    # Prepare the table header
+    if not args.silent:
+        print("Generation Tasks:")
+        print(f"{'#':<4} {'Prompt':<40}")
+        print("-" * 45)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=throttle_limit) as executor:
+        for prompt in prompts:
+            for j in range(args.numVariations):
+                current_generation += 1
+                if not args.silent:
+                    print(f"{current_generation:<4} {prompt[:40]:<40}")
+                tasks.append(executor.submit(fill_task, prompt, j))
+        for future in concurrent.futures.as_completed(tasks):
+            future.result()
+
+    if not args.silent:
+        print("\nAll fill generation tasks completed.")
 
 def handle_mask_command(args, access_token):
     """Handle the mask command."""
