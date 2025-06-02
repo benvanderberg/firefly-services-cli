@@ -70,12 +70,17 @@ After installation, you can use the CLI tool in two ways:
 - **Generative Fill:** Fill masked areas in images with AI-generated content
 - **Generative Expand:** Expand images beyond their original boundaries
 - **Similar Image Generation:** Create variations of existing images
+- **Background Replacement:** Replace image backgrounds with AI-generated content
+- **Mask Generation:** Create masks for images with optional optimization and post-processing
 
 ### Text-to-Speech
 - Convert text to speech using various voices
 - Support for multiple languages and locales
 - Input from text or file
 - Customizable output format
+- Paragraph splitting for long texts
+- Voice and style variations
+- Automatic directory creation for output files
 
 ### Dubbing
 - Dub audio or video content to different languages
@@ -85,8 +90,10 @@ After installation, you can use the CLI tool in two ways:
 ### Transcription
 - Transcribe audio or video content
 - Support for multiple languages
-- Optional SRT caption generation
+- Multiple output formats (text, markdown, PDF)
 - Text-only output option
+- Speaker identification
+- Timestamp formatting
 
 ## Configuration
 
@@ -127,19 +134,13 @@ A SAS (Shared Access Signature) token is required to securely upload files to Az
 6. Copy the "SAS token" value (it starts with "?sv=")
 7. Add it to your `.env` file as `AZURE_STORAGE_SAS_TOKEN`
 
-The SAS token is used to:
-- Securely upload input files (images, audio, video) to Azure Storage
-- Make these files accessible to the Firefly Services API
-- Allow the API to process files that are too large to be sent directly
-- Enable processing of files that need to be referenced multiple times
-
-## Usage
+## Usage Examples
 
 ### Image Generation
 Generate images using text prompts with various models and styles.
 
 ```bash
-./ff.py image -p "your prompt" -o output.jpg
+ff image -p "your prompt" -o output.jpg
 ```
 
 Options:
@@ -164,7 +165,7 @@ This will generate 4 different images:
 3. "a dog in a garden"
 4. "a dog in a forest"
 
-The variations will be reflected in the output filenames using the `{var1}`, `{var2}`, etc. tokens. You can use this syntax in any command that accepts a prompt, including image generation, expansion, and fill commands.
+The variations will be reflected in the output filenames using the `{var1}`, `{var2}`, etc. tokens.
 
 #### Model Variations
 You can specify multiple model versions to generate images using different models. Use square brackets with comma-separated model names.
@@ -174,10 +175,6 @@ Example:
 ff image -p "a cat in a garden" -m "[image3,image4_ultra]" -o output_{model}.jpg
 ```
 
-This will generate 2 different images:
-1. Using the Image 3 model
-2. Using the Image 4 Ultra model
-
 Available model versions:
 - `image3`: Standard Image 3 model
 - `image4`: Standard Image 4 model
@@ -185,13 +182,69 @@ Available model versions:
 - `image4_ultra`: Ultra Image 4 model
 - `ultra`: Ultra Image 4 model (alias for image4_ultra)
 
-The model version will be reflected in the output filename using the `{model}` token. You can combine model variations with prompt variations to generate images with all possible combinations.
+### Background Replacement
+Replace image backgrounds with AI-generated content.
+
+```bash
+ff replace-bg -i input.jpg -p "a [red,green,blue] sky" -o output_{var1}.jpg
+```
+
+Options:
+- `-i, --input`: Input image file
+- `-p, --prompt`: Background prompt with optional variations
+- `-o, --output`: Output file path with {var1} token for variations
+- `-d, --debug`: Enable debug output
+
+### Generative Fill
+Fill masked areas in images with AI-generated content.
+
+```bash
+ff fill -i input.jpg -m mask.jpg -p "your prompt" -o output.jpg
+```
+
+Options:
+- `-i, --input`: Input image file
+- `-m, --mask`: Mask image file
+- `-p, --prompt`: Fill prompt
+- `-o, --output`: Output file path
+- `--mask-invert`: Invert the mask before use
+- `-d, --debug`: Enable debug output
+
+### Image Expansion
+Expand images beyond their original boundaries.
+
+```bash
+ff expand -i input.jpg -p "your prompt" -o output.jpg
+```
+
+Options:
+- `-i, --input`: Input image file
+- `-p, --prompt`: Expansion prompt
+- `-o, --output`: Output file path
+- `-m, --mask`: Optional mask file
+- `--mask-invert`: Invert the mask before use
+- `-d, --debug`: Enable debug output
+
+### Mask Generation
+Create masks for images.
+
+```bash
+ff mask -i input.jpg -o mask.png
+```
+
+Options:
+- `-i, --input`: Input image file
+- `-o, --output`: Output mask file
+- `--optimize`: Optimize the mask
+- `--no-postprocess`: Disable post-processing
+- `--mask-format`: Mask format (default: png)
+- `-d, --debug`: Enable debug output
 
 ### Text-to-Speech
 Convert text to speech using various voices and styles.
 
 ```bash
-./ff.py tts -f input.txt -v "[John,Maria]" -vs "[Casual,Happy]" -o "outputs/speech_{voice_name}_{voice_style}.mp3"
+ff tts -f input.txt -v "[John,Maria]" -vs "[Casual,Happy]" -o "outputs/speech_{voice_name}_{voice_style}.mp3"
 ```
 
 Options:
@@ -201,23 +254,14 @@ Options:
 - `-vs, --voice-style`: Voice styles (comma-separated)
 - `-o, --output`: Output file path with tokens
 - `-l, --locale`: Locale code (e.g., "en-US")
-- `--p-split`: Split text file into paragraphs and process each separately (adds _pN suffix to output files)
+- `--p-split`: Split text file into paragraphs
 - `-d, --debug`: Enable debug output
-
-Example with paragraph splitting:
-```bash
-ff tts -f input.txt --p-split -v "John" -vs "Casual" -o "outputs/speech_{voice_name}_{voice_style}.mp3"
-```
-This will split the input text file into paragraphs and generate separate audio files for each paragraph, with filenames like:
-- outputs/speech_John_Casual_p1.mp3
-- outputs/speech_John_Casual_p2.mp3
-- etc.
 
 ### Dubbing
 Dub media files to different languages.
 
 ```bash
-./ff.py dub -i input.mp4 -l "es-ES" -o output.mp4
+ff dub -i input.mp4 -l "es-ES" -o output.mp4
 ```
 
 Options:
@@ -231,14 +275,15 @@ Options:
 Transcribe media files to text.
 
 ```bash
-./ff.py transcribe -i input.mp4 -l "en-US" -o output.txt
+ff transcribe -i input.mp4 -l "en-US" -o output.txt
 ```
 
 Options:
 - `-i, --input`: Input media file
 - `-l, --locale`: Target locale code
-- `-t, --type`: Media type
-- `-c, --captions`: Generate captions
+- `-t, --type`: Media type (audio/video)
+- `--text-only`: Return only transcript text
+- `--output-type`: Output format (text/markdown/pdf)
 - `-o, --output`: Output file path
 - `-d, --debug`: Enable debug output
 
@@ -246,72 +291,44 @@ Options:
 List all available voices for text-to-speech.
 
 ```bash
-./ff.py voices
+ff voices
 ```
 
-Options:
-- `-d, --debug`: Enable debug output
+## Common Features
 
-### Image Expansion
-Expand images beyond their original boundaries.
-
-```bash
-./ff.py expand -i input.jpg -p "prompt" -o output.jpg
-```
-
-Options:
-- `-i, --input`: Input image file
-- `-p, --prompt`: Text prompt
-- `-m, --mask`: Mask image file
-- `-mi, --mask-invert`: Invert mask
-- `-n, --numVariations`: Number of variations (1-4)
-- `-o, --output`: Output file path
-- `-d, --debug`: Enable debug output
-
-### Generative Fill
-Fill masked areas in images.
-
-```bash
-./ff.py fill -i input.jpg -m mask.jpg -p "prompt" -o output.jpg
-```
-
-Options:
-- `-i, --input`: Input image file
-- `-m, --mask`: Mask image file
-- `-p, --prompt`: Text prompt
-- `-n, --numVariations`: Number of variations (1-4)
-- `-o, --output`: Output file path
-- `-d, --debug`: Enable debug output
-
-## Output File Tokens
-
+### Output Filename Tokens
 The following tokens can be used in output filenames:
-
-- `{date}`: Current date (YYYY-MM-DD)
-- `{time}`: Current time (HH-MM-SS)
-- `{datetime}`: Current date and time (YYYY-MM-DD_HH-MM-SS)
-- `{voice_name}`: Voice name (for TTS)
-- `{voice_style}`: Voice style (for TTS)
-- `{voice_id}`: Voice ID (for TTS)
-- `{locale_code}`: Locale code
-- `{n}`: Variation number (for image generation)
+- `{var1}`, `{var2}`, etc.: Variation numbers
 - `{model}`: Model version
-- `{size}`: Image size
+- `{size}`: Image size (e.g., "1024x1024")
 - `{width}`: Image width
 - `{height}`: Image height
 - `{dimensions}`: Image dimensions (WxH)
+- `{voice_name}`: Voice name
+- `{voice_style}`: Voice style
+- `{voice_id}`: Voice ID
+- `{locale_code}`: Locale code
+- `{date}`: Current date (YYYY-MM-DD)
+- `{time}`: Current time (HH-MM-SS)
+- `{datetime}`: Current date and time (YYYY-MM-DD_HH-MM-SS)
+- `{para_num}`: Paragraph number (when using --p-split)
+- `{total_paras}`: Total number of paragraphs
+- `{sentence_num}`: Sentence number (when splitting paragraphs)
+- `{total_sentences}`: Total number of sentences
+- `{char_count}`: Character count
 
-## Rate Limiting
-
-The CLI includes built-in rate limiting to prevent API throttling. The default rate limit is 5 calls per minute, but this can be adjusted by setting the `THROTTLE_LIMIT_FIREFLY` environment variable in your `.env` file.
-
-## Debug Mode
-
-Add the `-d` or `--debug` flag to any command to enable detailed debug output, including:
+### Debug Mode
+Add `-d` or `--debug` to any command to enable detailed debug output, including:
 - API request/response details
 - File operations
+- Job status updates
 - Rate limiting information
-- Error traces
+
+### Silent Mode
+Add `-s` or `--silent` to suppress progress messages and only show errors.
+
+### Overwrite Protection
+By default, the CLI will not overwrite existing files. Use `--overwrite` to allow overwriting of existing files.
 
 ## Directory Structure
 
