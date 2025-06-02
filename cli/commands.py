@@ -11,6 +11,7 @@ from tabulate import tabulate
 from typing import List, Dict, Any, Optional, Union, Tuple
 from dotenv import load_dotenv
 import re
+import glob
 
 from utils.auth import retrieve_access_token
 from utils.storage import upload_to_azure_storage
@@ -1030,16 +1031,23 @@ def handle_replace_bg_command(args, access_token):
     import tempfile
     import subprocess
     from utils.filename import get_unique_filename, parse_prompt_variations
+    import time
+
+    # Handle wildcard input files
+    input_files = glob.glob(args.input)
+    if not input_files:
+        print(f"No files found matching pattern: {args.input}")
+        sys.exit(1)
 
     if not args.silent:
-        print(f"Processing image: {args.input}")
+        print(f"Found {len(input_files)} files to process")
 
     # Parse prompt variations
     prompts, variation_blocks = parse_prompt_variations(args.prompt)
     total_variations = len(prompts)
 
-    # Get throttle limit from environment
-    throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
+    # Get throttle limit from environment - reduce it for mask operations
+    throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 2))  # Reduced from 5 to 2
     rate_limiter = RateLimiter(throttle_limit, 60)
 
     if not args.silent:
@@ -1047,93 +1055,127 @@ def handle_replace_bg_command(args, access_token):
         print(f'  • {total_variations} prompt variations')
         print(f'Using parallel processing with rate limit of {throttle_limit} calls per minute\n')
 
-    # Create temporary directory for mask files
-    with tempfile.TemporaryDirectory() as temp_dir:
-        # Step 1: Create mask
-        mask_path = os.path.join(temp_dir, "mask.png")
-        if not args.silent:
-            print("Creating mask...")
-        mask_result = create_mask(
-            access_token=access_token,
-            image_path=args.input,
-            output_path=mask_path,
-            debug=args.debug
-        )
-        if not mask_result:
-            print("Failed to create mask")
-            sys.exit(1)
+    def replace_bg_task(input_file, prompt, index):
+        max_retries = 3
+        retry_delay = 70  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                rate_limiter.acquire()
+                
+                # Get the base filename without extension
+                input_filename = os.path.splitext(os.path.basename(input_file))[0]
+                
+                # Create output filename with input_filename token
+                output_filename = args.output.replace("{input_filename}", input_filename)
+                if "{var1}" in output_filename:
+                    output_filename = output_filename.replace("{var1}", str(index + 1))
+                output_filename = get_unique_filename(output_filename, args.overwrite, args.debug)
 
-        # Step 2: Invert mask using ImageMagick
-        inverted_mask_path = os.path.join(temp_dir, "inverted_mask.png")
-        if not args.silent:
-            print("Inverting mask...")
-        try:
-            subprocess.run(['magick', mask_path, '-negate', inverted_mask_path], check=True)
-        except subprocess.CalledProcessError as e:
-            print(f"Error inverting mask: {str(e)}")
-            sys.exit(1)
+                if not args.silent:
+                    print(f"Processing {input_file} with prompt: {prompt}")
 
-        def replace_bg_task(prompt, index):
-            rate_limiter.acquire()
-            # Use the output pattern with {var1} directly
-            output_filename = args.output.replace("{var1}", str(index + 1))
-            output_filename = get_unique_filename(output_filename, args.overwrite, args.debug)
-
-            if not args.silent:
-                print(f"Generating new background with prompt: {prompt}")
-            
-            fill_result = fill_image(
-                access_token=access_token,
-                image_path=args.input,
-                mask_path=inverted_mask_path,
-                prompt=prompt,
-                num_variations=1,
-                mask_invert=True,
-                debug=args.debug
-            )
-
-            if not fill_result:
-                print(f"Failed to generate new background for prompt: {prompt}")
-                return False
-
-            # Poll for job completion
-            if args.debug:
-                print(f"Job ID: {fill_result['jobId']}")
-                print("Polling for job completion...")
-            result = check_job_status(fill_result['statusUrl'], access_token, args.silent, args.debug)
-
-            if 'result' in result and 'outputs' in result['result']:
-                outputs = result['result']['outputs']
-                if outputs:
+                # Create temporary directory for mask files
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    # Step 1: Create mask
+                    mask_path = os.path.join(temp_dir, "mask.png")
                     if not args.silent:
-                        print(f"Saving result to: {output_filename}")
-                    download_file(outputs[0]['image']['url'], output_filename, args.silent, args.debug)
-                    return True
+                        print("Creating mask...")
+                    mask_result = create_mask(
+                        access_token=access_token,
+                        image_path=input_file,
+                        output_path=mask_path,
+                        debug=args.debug
+                    )
+                    if not mask_result:
+                        print(f"Failed to create mask for {input_file}")
+                        return False
+
+                    # Step 2: Invert mask using ImageMagick
+                    inverted_mask_path = os.path.join(temp_dir, "inverted_mask.png")
+                    if not args.silent:
+                        print("Inverting mask...")
+                    try:
+                        subprocess.run(['magick', mask_path, '-negate', inverted_mask_path], check=True)
+                    except subprocess.CalledProcessError as e:
+                        print(f"Error inverting mask for {input_file}: {str(e)}")
+                        return False
+
+                    # Step 3: Generate new background
+                    if not args.silent:
+                        print("Generating new background...")
+                    fill_result = fill_image(
+                        access_token=access_token,
+                        image_path=input_file,
+                        mask_path=inverted_mask_path,
+                        prompt=prompt,
+                        num_variations=1,
+                        mask_invert=True,
+                        debug=args.debug
+                    )
+
+                    if not fill_result:
+                        print(f"Failed to generate new background for {input_file}")
+                        return False
+
+                    # Poll for job completion
+                    if args.debug:
+                        print(f"Job ID: {fill_result['jobId']}")
+                        print("Polling for job completion...")
+                    result = check_job_status(fill_result['statusUrl'], access_token, args.silent, args.debug)
+
+                    if 'result' in result and 'outputs' in result['result']:
+                        outputs = result['result']['outputs']
+                        if outputs:
+                            if not args.silent:
+                                print(f"Saving result to: {output_filename}")
+                            download_file(outputs[0]['image']['url'], output_filename, args.silent, args.debug)
+                            return True
+                        else:
+                            print(f"No outputs found in response for {input_file}")
+                            return False
+                    else:
+                        print(f"Failed to get result from job for {input_file}")
+                        return False
+                        
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        print(f"\nReceived 429 (Too Many Requests) error for {input_file}. Waiting {retry_delay} seconds before retry {attempt + 2}/{max_retries}...")
+                        time.sleep(retry_delay)
+                        continue
+                    else:
+                        print(f"\nFailed to process {input_file} after {max_retries} attempts due to rate limiting.")
+                        return False
                 else:
-                    print(f"No outputs found in response for prompt: {prompt}")
+                    print(f"HTTP Error processing {input_file}: {str(e)}")
                     return False
-            else:
-                print(f"Failed to get result from job for prompt: {prompt}")
+            except Exception as e:
+                print(f"Error processing {input_file}: {str(e)}")
+                if args.debug:
+                    import traceback
+                    traceback.print_exc()
                 return False
 
-        # Create tasks for parallel processing
-        tasks = []
-        current_generation = 0
+    # Create tasks for parallel processing
+    tasks = []
+    current_generation = 0
 
-        # Prepare the table header
-        if not args.silent:
-            print("Generation Tasks:")
-            print(f"{'#':<4} {'Prompt':<40}")
-            print("-" * 45)
+    # Prepare the table header
+    if not args.silent:
+        print("Generation Tasks:")
+        print(f"{'#':<4} {'Input File':<30} {'Prompt':<40}")
+        print("-" * 75)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=throttle_limit) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=throttle_limit) as executor:
+        for input_file in input_files:
             for i, prompt in enumerate(prompts):
                 current_generation += 1
                 if not args.silent:
-                    print(f"{current_generation:<4} {prompt[:40]:<40}")
-                tasks.append(executor.submit(replace_bg_task, prompt, i))
-            for future in concurrent.futures.as_completed(tasks):
-                future.result()
+                    print(f"{current_generation:<4} {os.path.basename(input_file):<30} {prompt[:40]:<40}")
+                tasks.append(executor.submit(replace_bg_task, input_file, prompt, i))
+        for future in concurrent.futures.as_completed(tasks):
+            future.result()
 
     if not args.silent:
         print("\nAll background replacement tasks completed.")

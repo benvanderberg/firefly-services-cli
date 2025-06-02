@@ -186,14 +186,22 @@ Available model versions:
 Replace image backgrounds with AI-generated content.
 
 ```bash
+# Single file
 ff replace-bg -i input.jpg -p "a [red,green,blue] sky" -o output_{var1}.jpg
+
+# Multiple files using wildcard (note the quotes around the pattern)
+ff replace-bg -i "sample-files/*.jpg" -p "a cosmic nebula in space" -o nebulaBag_{input_filename}.jpg
 ```
 
 Options:
-- `-i, --input`: Input image file
+- `-i, --input`: Input image file or pattern (supports wildcards, must be quoted)
 - `-p, --prompt`: Background prompt with optional variations
-- `-o, --output`: Output file path with {var1} token for variations
+- `-o, --output`: Output file path with tokens:
+  - `{var1}`: Variation number
+  - `{input_filename}`: Original input filename without extension
 - `-d, --debug`: Enable debug output
+
+Note: When using wildcards in the input pattern, make sure to quote the pattern (e.g., `"sample-files/*.jpg"`) to prevent shell expansion.
 
 ### Generative Fill
 Fill masked areas in images with AI-generated content.
