@@ -78,4 +78,11 @@ def parse_args():
     model_status_parser = subparsers.add_parser('model-status', aliases=['cm-status', 'ms'], parents=[common_args], help='Get custom model status')
     model_status_parser.add_argument('--model-id', required=True, help='ID of the model to check')
 
+    # Replace background command
+    replace_bg_parser = subparsers.add_parser('replace-bg', parents=[common_args], help='Replace image background')
+    replace_bg_parser.add_argument('-i', '--input', required=True, help='Input image file path')
+    replace_bg_parser.add_argument('-p', '--prompt', required=True, help='Text prompt for new background')
+    replace_bg_parser.add_argument('-o', '--output', required=True, help='Output file path')
+    replace_bg_parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files')
+
     return parser.parse_args() 

@@ -159,4 +159,13 @@ def create_parser():
     mask_parser.add_argument('--mask-invert', action='store_true', help='Invert the generated mask')
     mask_parser.set_defaults(func=handle_mask_command)
 
+    # Replace background command
+    replace_bg_parser = subparsers.add_parser('replace-bg', help='Replace image background')
+    replace_bg_parser.add_argument('-i', '--input', required=True, help='Input image file path')
+    replace_bg_parser.add_argument('-p', '--prompt', required=True, help='Text prompt for new background')
+    replace_bg_parser.add_argument('-o', '--output', required=True, help='Output file path')
+    replace_bg_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information')
+    replace_bg_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
+    replace_bg_parser.add_argument('-ow', '--overwrite', action='store_true', help='Overwrite existing files')
+
     return parser 

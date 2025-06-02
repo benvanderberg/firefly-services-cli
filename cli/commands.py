@@ -64,6 +64,8 @@ def handle_command(args):
         handle_fill_command(args, access_token)
     elif args.command == 'mask':
         handle_mask_command(args, access_token)
+    elif args.command == 'replace-bg':
+        handle_replace_bg_command(args, access_token)
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
@@ -969,6 +971,81 @@ def handle_mask_command(args, access_token):
     except Exception as e:
         print(f"Error creating mask: {str(e)}")
         sys.exit(1)
+
+def handle_replace_bg_command(args, access_token):
+    """Handle the replace background command."""
+    import tempfile
+    import subprocess
+    from utils.filename import get_unique_filename
+
+    if not args.silent:
+        print(f"Processing image: {args.input}")
+        print(f"New background prompt: {args.prompt}")
+
+    # Create temporary directory for mask files
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Step 1: Create mask
+        mask_path = os.path.join(temp_dir, "mask.png")
+        if not args.silent:
+            print("Creating mask...")
+        mask_result = create_mask(
+            access_token=access_token,
+            image_path=args.input,
+            output_path=mask_path,
+            debug=args.debug
+        )
+        if not mask_result:
+            print("Failed to create mask")
+            sys.exit(1)
+
+        # Step 2: Invert mask using ImageMagick
+        inverted_mask_path = os.path.join(temp_dir, "inverted_mask.png")
+        if not args.silent:
+            print("Inverting mask...")
+        try:
+            subprocess.run(['magick', mask_path, '-negate', inverted_mask_path], check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Error inverting mask: {str(e)}")
+            sys.exit(1)
+
+        # Step 3: Use fill command with the local inverted mask file
+        if not args.silent:
+            print("Generating new background...")
+        fill_result = fill_image(
+            access_token=access_token,
+            image_path=args.input,
+            mask_path=inverted_mask_path,
+            prompt=args.prompt,
+            num_variations=1,
+            mask_invert=True,
+            debug=args.debug
+        )
+
+        if not fill_result:
+            print("Failed to generate new background")
+            sys.exit(1)
+
+        # Poll for job completion
+        print(f"Job ID: {fill_result['jobId']}")
+        print("Polling for job completion...")
+        result = check_job_status(fill_result['statusUrl'], access_token, args.silent, args.debug)
+
+        if 'result' in result and 'outputs' in result['result']:
+            outputs = result['result']['outputs']
+            if outputs:
+                # Step 4: Save the result
+                output_filename = get_unique_filename(args.output, args.overwrite, args.debug)
+                if not args.silent:
+                    print(f"Saving result to: {output_filename}")
+                download_file(outputs[0]['image']['url'], output_filename, args.silent, args.debug)
+            else:
+                print("No outputs found in response")
+        else:
+            print("Failed to get result from job")
+            sys.exit(1)
+
+    if not args.silent:
+        print("Background replacement completed successfully")
 
 def check_job_status(status_url, access_token, silent=False, debug=False):
     """
