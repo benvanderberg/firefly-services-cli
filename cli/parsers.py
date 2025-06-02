@@ -99,6 +99,7 @@ def create_parser():
     tts_parser.add_argument('-vid', '--voice-id', help='Voice ID to use for speech generation. Can be a single ID or a list in [id1,id2,...] format')
     tts_parser.add_argument('-vs', '--voice-style', help='Voice style to use (Casual or Happy). Required when using --voice. Can be a single style or a list in [style1,style2,...] format')
     tts_parser.add_argument('-l', '--locale', default='en-US', help='Locale code for the text (default: en-US)')
+    tts_parser.add_argument('--p-split', action='store_true', help='Split text file into paragraphs and process each separately')
     tts_parser.add_argument('-d', '--debug', action='store_true',
                           help='Show debug information including full HTTP request details')
     tts_parser.add_argument('-silent', '--silent', action='store_true',

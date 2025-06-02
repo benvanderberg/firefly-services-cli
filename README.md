@@ -201,7 +201,17 @@ Options:
 - `-vs, --voice-style`: Voice styles (comma-separated)
 - `-o, --output`: Output file path with tokens
 - `-l, --locale`: Locale code (e.g., "en-US")
+- `--p-split`: Split text file into paragraphs and process each separately (adds _pN suffix to output files)
 - `-d, --debug`: Enable debug output
+
+Example with paragraph splitting:
+```bash
+ff tts -f input.txt --p-split -v "John" -vs "Casual" -o "outputs/speech_{voice_name}_{voice_style}.mp3"
+```
+This will split the input text file into paragraphs and generate separate audio files for each paragraph, with filenames like:
+- outputs/speech_John_Casual_p1.mp3
+- outputs/speech_John_Casual_p2.mp3
+- etc.
 
 ### Dubbing
 Dub media files to different languages.

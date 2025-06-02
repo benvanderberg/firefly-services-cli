@@ -8,6 +8,7 @@ from datetime import datetime
 from tabulate import tabulate
 from typing import List, Dict, Any, Optional, Union
 from dotenv import load_dotenv
+import re
 
 from utils.auth import retrieve_access_token
 from utils.storage import upload_to_azure_storage
@@ -352,103 +353,220 @@ def handle_tts_command(args, access_token):
     for i, combo in enumerate(voice_combinations, 1):
         print(f"{i}. ID: {combo['id']}, Name: {combo['name']}, Style: {combo['style']}")
 
+    # Split text into paragraphs if requested
+    paragraphs = []
+    paragraph_info = []  # Store info about each paragraph
+    if args.p_split and args.file:
+        # Split by double newlines and filter out empty paragraphs
+        raw_paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        
+        if args.debug:
+            print(f"\nFound {len(raw_paragraphs)} paragraphs in the text file")
+            for i, p in enumerate(raw_paragraphs, 1):
+                print(f"\nParagraph {i}:")
+                print(f"  Length: {len(p)} characters")
+                print(f"  Preview: {p[:100] + '...' if len(p) > 100 else p}")
+        
+        # Process each paragraph to handle incomplete sentences and long paragraphs
+        for para_num, para in enumerate(raw_paragraphs, 1):
+            # Skip paragraphs that are just numbers or references
+            if para.strip('[]()').isdigit():
+                if args.debug:
+                    print(f"Skipping paragraph {para_num} as it's just a reference number")
+                continue
+                
+            # Split into sentences using regex to handle various sentence endings
+            import re
+            sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', para)
+            sentences = [s.strip() for s in sentences if s.strip()]
+            
+            # Skip incomplete sentences
+            sentences = [s for s in sentences if not s.endswith('wa.')]
+            
+            # Combine short sentences (less than 15 chars) with the next sentence
+            combined_sentences = []
+            i = 0
+            while i < len(sentences):
+                current = sentences[i]
+                if len(current) < 15 and i + 1 < len(sentences):
+                    # Combine with next sentence
+                    next_sentence = sentences[i + 1]
+                    combined = f"{current} {next_sentence}"
+                    combined_sentences.append(combined)
+                    i += 2
+                else:
+                    combined_sentences.append(current)
+                    i += 1
+            
+            sentences = combined_sentences
+            
+            if args.debug:
+                print(f"\nProcessing paragraph {para_num}:")
+                print(f"  Found {len(sentences)} sentences after combining short ones")
+                print(f"  Length: {len(para)} characters")
+                for i, s in enumerate(sentences, 1):
+                    print(f"  Sentence {i}: {s[:50]}{'...' if len(s) > 50 else ''}")
+            
+            # If paragraph is too long, split it into sentences
+            if len(para) > 500:
+                # Add each sentence as a separate paragraph
+                for i, sentence in enumerate(sentences, 1):
+                    if len(sentence) > 50:  # Only include sentences longer than 50 chars
+                        paragraphs.append(sentence)
+                        paragraph_info.append({
+                            'para_num': para_num,
+                            'total_paras': len(raw_paragraphs),
+                            'sentence_num': i,
+                            'total_sentences': len(sentences),
+                            'char_count': len(sentence),
+                            'is_split': True
+                        })
+                        if args.debug:
+                            print(f"  Split sentence {i}: {sentence[:50]}...")
+            else:
+                # Add the paragraph as is if it's not too long
+                paragraphs.append(para)
+                paragraph_info.append({
+                    'para_num': para_num,
+                    'total_paras': len(raw_paragraphs),
+                    'sentence_num': 1,
+                    'total_sentences': len(sentences),
+                    'char_count': len(para),
+                    'is_split': False
+                })
+                if args.debug:
+                    print(f"  Keeping as single paragraph: {para[:50]}...")
+        
+        if args.debug:
+            print(f"\nFinal split into {len(paragraphs)} segments:")
+            for i, (p, info) in enumerate(zip(paragraphs, paragraph_info), 1):
+                print(f"\nSegment {i}:")
+                print(f"  Paragraph {info['para_num']} of {info['total_paras']}")
+                print(f"  Sentence {info['sentence_num']} of {info['total_sentences']}")
+                print(f"  Characters: {info['char_count']}")
+                print(f"  Split from longer paragraph: {info['is_split']}")
+                print(f"  Preview: {p[:100] + '...' if len(p) > 100 else p}")
+    else:
+        paragraphs = [text]
+        paragraph_info = [{
+            'para_num': 1,
+            'total_paras': 1,
+            'sentence_num': 1,
+            'total_sentences': 1,
+            'char_count': len(text),
+            'is_split': False
+        }]
+
     # Create tasks for parallel processing
     tasks = []
     for combo in voice_combinations:
-        def tts_task(voice_combo):
-            try:
-                # Generate speech
-                if args.debug:
-                    print(f"\nGenerating speech with voice: {voice_combo['id']} ({voice_combo['name']} - {voice_combo['style']})")
-                
-                # Create tokens for filename
-                tokens = {
-                    'date': datetime.now().strftime('%Y-%m-%d'),
-                    'time': datetime.now().strftime('%H-%M-%S'),
-                    'datetime': datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
-                    'voice_id': voice_combo['id'],
-                    'voice_name': voice_combo['name'],
-                    'voice_style': voice_combo['style'] or '',
-                    'locale_code': args.locale
-                }
-                
-                # Replace tokens in output path
-                output_path = args.output.format(**tokens)
-                if args.debug:
-                    print(f"Original output path: {args.output}")
-                    print(f"Tokens: {tokens}")
-                    print(f"Replaced output path: {output_path}")
-                
-                # Generate speech
-                response = generate_speech(
-                    access_token=access_token,
-                    text=text,
-                    voice_id=voice_combo['id'],
-                    locale_code=args.locale,
-                    debug=args.debug
-                )
-                
-                if response and 'jobId' in response and 'statusUrl' in response:
+        for i, (paragraph, info) in enumerate(zip(paragraphs, paragraph_info), 1):
+            def tts_task(voice_combo, para, info):
+                try:
+                    # Generate speech
                     if args.debug:
-                        print(f"Job ID: {response['jobId']}")
-                        print("Polling for job completion...")
+                        print(f"\nGenerating speech with voice: {voice_combo['id']} ({voice_combo['name']} - {voice_combo['style']})")
+                        print(f"Processing paragraph {info['para_num']} of {info['total_paras']}")
+                        if info['is_split']:
+                            print(f"Segment {info['sentence_num']} of {info['total_sentences']} sentences")
                     
-                    # Poll the status URL until the job is complete
-                    result = check_job_status(response['statusUrl'], access_token, args.silent, args.debug)
+                    # Create tokens for filename
+                    tokens = {
+                        'date': datetime.now().strftime('%Y-%m-%d'),
+                        'time': datetime.now().strftime('%H-%M-%S'),
+                        'datetime': datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
+                        'voice_id': voice_combo['id'],
+                        'voice_name': voice_combo['name'],
+                        'voice_style': voice_combo['style'] or '',
+                        'locale_code': args.locale,
+                        'para_num': f"{info['para_num']:02d}",
+                        'total_paras': f"{info['total_paras']:02d}",
+                        'sentence_num': f"{info['sentence_num']:02d}",
+                        'total_sentences': f"{info['total_sentences']:02d}",
+                        'char_count': f"{info['char_count']:02d}"
+                    }
                     
-                    if result.get('status') == 'succeeded' and 'output' in result and 'url' in result['output']:
-                        # Download the audio file
-                        audio_url = result['output']['url']
-                        if args.debug:
-                            print(f"Downloading audio to {output_path}...")
-                            print(f"Audio URL: {audio_url}")
-                        
-                        # Create output directory if it doesn't exist
-                        output_dir = os.path.dirname(output_path)
-                        if output_dir:
-                            os.makedirs(output_dir, exist_ok=True)
-                            if args.debug:
-                                print(f"Created output directory: {output_dir}")
-                        
-                        # Download the file
-                        try:
-                            if args.debug:
-                                print(f"Making request to download file from {audio_url}")
-                            response = requests.get(audio_url, stream=True)
-                            response.raise_for_status()
-                            
-                            if args.debug:
-                                print(f"Response status: {response.status_code}")
-                                print(f"Response headers: {response.headers}")
-                            
-                            with open(output_path, 'wb') as f:
-                                for chunk in response.iter_content(chunk_size=8192):
-                                    if chunk:
-                                        f.write(chunk)
-                            
-                            if args.debug:
-                                print(f"Successfully downloaded to {output_path}")
-                                print(f"File size: {os.path.getsize(output_path)} bytes")
-                            return True
-                        except Exception as e:
-                            print(f"Error downloading file for {voice_combo['name']}: {str(e)}")
-                            if args.debug:
-                                import traceback
-                                traceback.print_exc()
-                            return False
+                    # Add paragraph number to output path if splitting paragraphs
+                    if args.p_split:
+                        output_path = args.output.format(**tokens)
                     else:
+                        output_path = args.output.format(**tokens)
+                    
+                    if args.debug:
+                        print(f"Original output path: {args.output}")
+                        print(f"Tokens: {tokens}")
+                        print(f"Replaced output path: {output_path}")
+                    
+                    # Generate speech
+                    response = generate_speech(
+                        access_token=access_token,
+                        text=para,
+                        voice_id=voice_combo['id'],
+                        locale_code=args.locale,
+                        debug=args.debug
+                    )
+                    
+                    if response and 'jobId' in response and 'statusUrl' in response:
                         if args.debug:
-                            print("No output URL found in result")
-                            print(f"Result: {result}")
-                return False
-            except Exception as e:
-                print(f"Error generating speech for {voice_combo['name']}: {str(e)}")
-                if args.debug:
-                    import traceback
-                    traceback.print_exc()
-                return False
+                            print(f"Job ID: {response['jobId']}")
+                            print("Polling for job completion...")
+                        
+                        # Poll the status URL until the job is complete
+                        result = check_job_status(response['statusUrl'], access_token, args.silent, args.debug)
+                        
+                        if result.get('status') == 'succeeded' and 'output' in result and 'url' in result['output']:
+                            # Download the audio file
+                            audio_url = result['output']['url']
+                            if args.debug:
+                                print(f"Downloading audio to {output_path}...")
+                                print(f"Audio URL: {audio_url}")
+                            
+                            # Create output directory if it doesn't exist
+                            output_dir = os.path.dirname(output_path)
+                            if output_dir:
+                                os.makedirs(output_dir, exist_ok=True)
+                                if args.debug:
+                                    print(f"Created output directory: {output_dir}")
+                            
+                            # Download the file
+                            try:
+                                if args.debug:
+                                    print(f"Making request to download file from {audio_url}")
+                                response = requests.get(audio_url, stream=True)
+                                response.raise_for_status()
+                                
+                                if args.debug:
+                                    print(f"Response status: {response.status_code}")
+                                    print(f"Response headers: {response.headers}")
+                                
+                                with open(output_path, 'wb') as f:
+                                    for chunk in response.iter_content(chunk_size=8192):
+                                        if chunk:
+                                            f.write(chunk)
+                                
+                                if args.debug:
+                                    print(f"Successfully downloaded to {output_path}")
+                                    print(f"File size: {os.path.getsize(output_path)} bytes")
+                                return True
+                            except Exception as e:
+                                print(f"Error downloading file for {voice_combo['name']}: {str(e)}")
+                                if args.debug:
+                                    import traceback
+                                    traceback.print_exc()
+                                return False
+                        else:
+                            if args.debug:
+                                print("No output URL found in result")
+                                print(f"Result: {result}")
+                    return False
+                except Exception as e:
+                    print(f"Error generating speech for {voice_combo['name']}: {str(e)}")
+                    if args.debug:
+                        import traceback
+                        traceback.print_exc()
+                    return False
 
-        tasks.append((tts_task, combo))
+            tasks.append((tts_task, combo, paragraph, info))
 
     # Process tasks in parallel with rate limiting
     results = process_tasks_parallel(tasks, rate_limiter)
@@ -857,13 +975,13 @@ def download_file(url, output_file, silent=False, debug=False):
 
 def read_text_file(file_path):
     """
-    Read text from a file and remove all newline characters.
+    Read text from a file and preserve paragraph structure.
     
     Args:
         file_path (str): Path to the text file
     
     Returns:
-        str: Contents of the file with newlines replaced by spaces
+        str: Contents of the file with preserved paragraph structure
     
     Raises:
         FileNotFoundError: If the file doesn't exist
@@ -871,12 +989,12 @@ def read_text_file(file_path):
     """
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            # Read the file and replace all types of newlines with spaces
+            # Read the file and normalize line endings
             content = f.read()
-            # Replace all types of newlines (\n, \r, \r\n) with spaces
-            content = content.replace('\r\n', ' ').replace('\r', ' ').replace('\n', ' ')
-            # Remove any multiple spaces that might have been created
-            content = ' '.join(content.split())
+            # Normalize all line endings to \n
+            content = content.replace('\r\n', '\n').replace('\r', '\n')
+            # Ensure paragraphs are separated by exactly two newlines
+            content = re.sub(r'\n{3,}', '\n\n', content)
             return content.strip()
     except FileNotFoundError:
         raise FileNotFoundError(f"Text file not found: {file_path}")
@@ -909,7 +1027,7 @@ def process_tasks_parallel(tasks, rate_limiter):
     Process tasks in parallel with rate limiting.
     
     Args:
-        tasks (list): List of (task_function, task_args) tuples
+        tasks (list): List of (task_function, *task_args) tuples
         rate_limiter (RateLimiter): Rate limiter instance
     
     Returns:
@@ -918,12 +1036,38 @@ def process_tasks_parallel(tasks, rate_limiter):
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         futures = []
-        for task_func, task_args in tasks:
+        for task_tuple in tasks:
+            task_func = task_tuple[0]
+            task_args = task_tuple[1:]  # Get all remaining elements as arguments
             rate_limiter.acquire()
-            futures.append(executor.submit(task_func, task_args))
+            futures.append(executor.submit(task_func, *task_args))
         
         for future in concurrent.futures.as_completed(futures):
-            results.append(future.result())
+            try:
+                result = future.result()
+                results.append(result)
+            except requests.exceptions.HTTPError as e:
+                if e.response.status_code == 429:
+                    print("\nReceived 429 (Too Many Requests) error. Waiting 70 seconds before retrying...")
+                    time.sleep(70)
+                    # Resubmit the task
+                    task_tuple = tasks[len(results)]  # Get the original task that failed
+                    task_func = task_tuple[0]
+                    task_args = task_tuple[1:]
+                    rate_limiter.acquire()
+                    new_future = executor.submit(task_func, *task_args)
+                    try:
+                        result = new_future.result()
+                        results.append(result)
+                    except Exception as e:
+                        print(f"Error after retry: {str(e)}")
+                        results.append(False)
+                else:
+                    print(f"HTTP Error: {str(e)}")
+                    results.append(False)
+            except Exception as e:
+                print(f"Error: {str(e)}")
+                results.append(False)
     
     return results
 
