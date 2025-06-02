@@ -2,6 +2,7 @@ import os
 import re
 import json
 import requests
+import time
 from itertools import product
 from utils.storage import upload_to_azure_storage
 from typing import Optional, List, Dict, Any, Union
@@ -393,4 +394,118 @@ def fill_image(
         print("Fill payload:", json.dumps(payload, indent=2))
     response = requests.post(url, headers=headers, json=payload)
     response.raise_for_status()
-    return response.json() 
+    return response.json()
+
+def create_mask(
+    access_token: str,
+    image_path: str,
+    output_path: str,
+    optimize: str = "performance",
+    postprocess: bool = True,
+    service_version: str = "4.0",
+    mask_format: str = "soft",
+    debug: bool = False
+) -> dict:
+    """
+    Create a mask from an input image using Adobe Sensei API.
+    
+    Args:
+        access_token (str): Adobe authentication token
+        image_path (str): Path to the input image file
+        output_path (str): Path where the mask will be saved
+        optimize (str): Optimization mode ("performance" or "quality")
+        postprocess (bool): Whether to apply post-processing
+        service_version (str): Service version to use
+        mask_format (str): Mask format ("soft" or "hard")
+        debug (bool): Whether to show debug information
+    
+    Returns:
+        dict: Job information including status URL
+    """
+    # Upload the input image to Azure Storage
+    input_url = upload_to_azure_storage(image_path, debug=debug)
+    
+    # Create output URL by modifying the input URL
+    output_url = input_url.rsplit('.', 1)[0] + '_masked.' + input_url.rsplit('.', 1)[1]
+    
+    # Prepare the request payload
+    payload = {
+        "input": {
+            "href": input_url,
+            "storage": "azure"
+        },
+        "output": {
+            "href": output_url,
+            "storage": "azure",
+            "overwrite": True,
+            "color": {
+                "space": "rgb"
+            },
+            "mask": {
+                "format": mask_format
+            }
+        },
+        "options": {
+            "optimize": optimize,
+            "postprocess": postprocess,
+            "serviceVersion": service_version
+        }
+    }
+    
+    # Prepare headers
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "x-api-key": os.environ['FIREFLY_SERVICES_CLIENT_ID']
+    }
+    
+    # Make the API request
+    url = "https://image.adobe.io/sensei/mask"
+    if debug:
+        print("Mask creation payload:", json.dumps(payload, indent=2))
+    
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    
+    # Get the status URL from the response
+    status_data = response.json()
+    status_url = status_data['_links']['self']['href']
+    
+    if debug:
+        print(f"Status URL: {status_url}")
+    
+    # Poll the status URL until the job is complete
+    while True:
+        status_response = requests.get(status_url, headers=headers)
+        status_response.raise_for_status()
+        status_data = status_response.json()
+        
+        if debug:
+            print("Status response:", json.dumps(status_data, indent=2))
+        
+        if status_data['status'] == 'succeeded':
+            # Get the output URL and download the mask
+            output_url = status_data['output']['href']
+            try:
+                # Download the file from Azure
+                mask_response = requests.get(output_url)
+                mask_response.raise_for_status()
+                
+                # Save to output file
+                with open(output_path, 'wb') as f:
+                    f.write(mask_response.content)
+                
+                if debug:
+                    print(f"Mask downloaded successfully to {output_path}")
+                break
+            except Exception as e:
+                if debug:
+                    print(f"Error downloading mask: {str(e)}")
+                raise
+        elif status_data['status'] == 'failed':
+            raise Exception(f"Mask creation failed: {status_data.get('error', 'Unknown error')}")
+        
+        # Wait before polling again
+        time.sleep(2)
+    
+    return status_data 

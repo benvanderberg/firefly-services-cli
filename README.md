@@ -1,10 +1,10 @@
-# Firefly Services CLI
+# ff - Adobe Firefly Services CLI
 
 A command-line interface for Adobe Firefly Services, providing easy access to image generation, text-to-speech, dubbing, and transcription capabilities.
 
 ## Quick Installation
 
-The easiest way to install the Firefly Services CLI is using the provided installation script:
+The easiest way to install the ff CLI is using the provided installation script:
 
 ```bash
 # Make the install script executable

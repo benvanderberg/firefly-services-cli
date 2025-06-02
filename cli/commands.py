@@ -2,11 +2,13 @@ import os
 import sys
 import json
 import time
+import asyncio
+import aiohttp
 import requests
 import concurrent.futures
-from datetime import datetime
+from datetime import datetime, timedelta, UTC
 from tabulate import tabulate
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 from dotenv import load_dotenv
 import re
 
@@ -14,7 +16,7 @@ from utils.auth import retrieve_access_token
 from utils.storage import upload_to_azure_storage
 from utils.rate_limiter import RateLimiter
 from utils.filename import parse_size, parse_prompt_variations, get_variation_filename, get_unique_filename, replace_filename_tokens
-from services.image import generate_image, parse_model_variations, parse_style_ref_variations, generate_similar_image, expand_image, fill_image
+from services.image import generate_image, parse_model_variations, parse_style_ref_variations, generate_similar_image, expand_image, fill_image, create_mask
 from services.speech import generate_speech, get_available_voices, parse_voice_variations, get_voice_id_by_name
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
@@ -60,6 +62,8 @@ def handle_command(args):
         handle_expand_command(args, access_token)
     elif args.command == 'fill':
         handle_fill_command(args, access_token)
+    elif args.command == 'mask':
+        handle_mask_command(args, access_token)
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
@@ -896,6 +900,43 @@ def handle_fill_command(args, access_token):
             download_file(image_url, output_filename, args.silent, args.debug)
     else:
         print("No outputs found in response.")
+
+def handle_mask_command(args, access_token):
+    """Handle the mask command."""
+    try:
+        # Create output directory if it doesn't exist
+        output_dir = os.path.dirname(args.output)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        
+        # Get unique filename if needed
+        output_filename = get_unique_filename(args.output, args.overwrite, args.debug)
+        
+        # Create the mask
+        job_info = create_mask(
+            access_token=access_token,
+            image_path=args.input,
+            output_path=output_filename,
+            optimize=args.optimize,
+            postprocess=not args.no_postprocess,
+            service_version=args.service_version,
+            mask_format=args.mask_format,
+            debug=args.debug
+        )
+        
+        # If mask-invert is set, use ImageMagick to invert the mask
+        if args.mask_invert:
+            import subprocess
+            subprocess.run(['convert', output_filename, '-negate', output_filename], check=True)
+        
+        if args.debug:
+            print(f"Mask created successfully: {output_filename}")
+            print(f"Job ID: {job_info.get('jobID')}")
+            print(f"Status: {job_info.get('status')}")
+        
+    except Exception as e:
+        print(f"Error creating mask: {str(e)}")
+        sys.exit(1)
 
 def check_job_status(status_url, access_token, silent=False, debug=False):
     """

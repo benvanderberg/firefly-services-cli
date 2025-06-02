@@ -119,3 +119,21 @@ print_message "1. Update the .env to add your credentials"
 print_message "2. The virtual environment is now activated. To activate it in future sessions, run:"
 print_message "   source venv/bin/activate"
 print_message "3. Use './bin/ff' to run the tool"
+
+# Check if ImageMagick is installed
+if ! command -v convert &> /dev/null; then
+    echo "ImageMagick is not installed. Installing..."
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS
+        brew install imagemagick
+    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # Linux
+        sudo apt-get update
+        sudo apt-get install -y imagemagick
+    else
+        echo "Unsupported OS for automatic ImageMagick installation. Please install it manually."
+        exit 1
+    fi
+else
+    echo "ImageMagick is already installed."
+fi

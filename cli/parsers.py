@@ -1,11 +1,12 @@
 import argparse
 from datetime import datetime, timedelta, UTC
+from cli.commands import handle_mask_command
 
 def create_parser():
     """
     Create the main argument parser with all subcommands and their arguments.
     """
-    parser = argparse.ArgumentParser(description='Adobe Firefly Services CLI')
+    parser = argparse.ArgumentParser(description='ff - Adobe Firefly Services CLI')
     subparsers = parser.add_subparsers(dest='command', help='Command to execute')
 
     # Image generation command
@@ -140,5 +141,22 @@ def create_parser():
                                 help='Show debug information including full HTTP request details')
     transcribe_parser.add_argument('-silent', '--silent', action='store_true',
                                 help='Minimize output messages')
+
+    # Mask creation command
+    mask_parser = subparsers.add_parser('mask', help='Create a mask from an image')
+    mask_parser.add_argument('-i', '--input', required=True, help='Input image file path')
+    mask_parser.add_argument('-o', '--output', default='output.png', help='Output mask file path')
+    mask_parser.add_argument('--optimize', choices=['performance', 'quality'], default='performance',
+                           help='Optimization mode (default: performance)')
+    mask_parser.add_argument('--no-postprocess', action='store_true',
+                           help='Disable post-processing of the mask')
+    mask_parser.add_argument('--service-version', default='4.0', help='Service version to use')
+    mask_parser.add_argument('--mask-format', choices=['soft', 'hard'], default='soft',
+                           help='Mask format (default: soft)')
+    mask_parser.add_argument('-d', '--debug', action='store_true', help='Enable debug output')
+    mask_parser.add_argument('-ow', '--overwrite', action='store_true',
+                           help='Overwrite existing files instead of adding number suffix')
+    mask_parser.add_argument('--mask-invert', action='store_true', help='Invert the generated mask')
+    mask_parser.set_defaults(func=handle_mask_command)
 
     return parser 
