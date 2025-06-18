@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any, Union
 def generate_image(access_token, prompt, num_generations=1, model_version='image3', content_class='photo',
                   negative_prompt=None, prompt_biasing_locale=None, size=None, seeds=None, debug=False,
                   visual_intensity=None, style_ref_path=None, style_ref_strength=50,
-                  composition_ref_path=None, composition_ref_strength=50):
+                  composition_ref_path=None, composition_ref_strength=50, custom_model=False):
     """
     Generate images using Adobe Firefly Services API.
     
@@ -30,6 +30,7 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
         style_ref_strength (int): Strength of the style reference (1-100)
         composition_ref_path (str): Path to composition reference image file
         composition_ref_strength (int): Strength of the composition reference (1-100)
+        custom_model (bool): If True, treat model_version as a custom model assetId and set x-model-version header to 'image4_custom' and customModelId in body
     
     Returns:
         dict: Job information including job ID and status
@@ -45,9 +46,14 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
     data = {
         "prompt": prompt,
         "numVariations": num_generations,
-        "modelVersion": model_version,
         "contentClass": content_class
     }
+    
+    if custom_model:
+        headers["x-model-version"] = "image4_custom"
+        data["customModelId"] = model_version
+    else:
+        data["modelVersion"] = model_version
     
     if negative_prompt:
         data["negativePrompt"] = negative_prompt
@@ -94,6 +100,7 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
     
     if debug:
         print("Request data:", json.dumps(data, indent=2))
+        print("Request headers:", json.dumps(headers, indent=2))
     
     try:
         response = requests.post(url, headers=headers, json=data)

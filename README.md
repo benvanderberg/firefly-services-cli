@@ -409,21 +409,41 @@ List all available custom models for your Firefly credentials.
 ff cm-list
 ```
 
-Output as a table:
-```
-+----------------------+----------+---------------+---------------------+------------+-------------------------------+---------------------------+---------------------------+---------+------------------------------------------+-------------------------------+---------+
-| Display Name         | Version  | Training Mode | Base Model          | Concept ID | Sample Prompt                 | Created                   | Modified                  | State   | Asset ID                                 | Asset Name                    | Size    |
-+======================+==========+===============+=====================+============+===============================+===========================+===========================+=========+==========================================+===============================+=========+
-| BOD - Shantanu Narayen | 1        | subject       | image4_custom 4.0.0 | Shantanu   | Shantanu playing guitar ...   | 2025-06-17T22:16:36.746Z  | 2025-06-18T00:16:58.160Z  | published | urn:aaid:sc:VA6C2:0091660b-...           | BOD - Shantanu Narayen.ffcustommodel | 27.29 GB |
-| Vacation             | 1        | style         | image3_custom 3.0.0 |            | an umbrella with a beach ...  | 2025-02-27T06:25:49.120Z  | 2025-02-27T07:05:18.993Z  | published | urn:aaid:sc:VA6C2:03b84e6d-...           | Vacation.ffcustommodel         | 11.31 GB |
-| ...                  | ...      | ...           | ...                 | ...        | ...                           | ...                       | ...                       | ...     | ...                                      | ...                           | ...     |
-+----------------------+----------+---------------+---------------------+------------+-------------------------------+---------------------------+---------------------------+---------+------------------------------------------+-------------------------------+---------+
-```
+- Outputs a pretty table (using Rich) with the most important fields.
+- Use `--csv` to output **all fields** from the API response for scripting or analysis:
 
-Output as CSV:
 ```bash
 ff cm-list --csv
 ```
+
+- You can search for custom models by display name or assetId using the `-m` flag in `ff image` (see below).
+- The CLI supports partial/fuzzy matching for display names (case-insensitive, partial match allowed).
+
+### Using Custom Models with Image Generation
+
+You can use a custom model by its display name or assetId with the `-m`/`--model` flag:
+
+```bash
+# By display name (case-insensitive, partial match allowed)
+ff image -p "shantanu eating a sandwich in a cafe" -o shantanu.jpg -m "BOD - Shantanu Narayen"
+
+# By assetId (exact match)
+ff image -p "shantanu eating a sandwich in a cafe" -o shantanu.jpg -m "urn:aaid:sc:VA6C2:0091660b-2d76-4394-b884-811474f69634"
+```
+
+- If you specify a standard model (e.g., `image3`, `image4`), the CLI uses the standard Firefly model.
+- If you specify a custom model (by display name or assetId), the CLI will:
+  - Look up the custom model using the Firefly Custom Models API.
+  - If found, use the correct API headers and body:
+    - Sets `x-model-version: image4_custom` in the request header
+    - Adds `"customModelId": "{assetId}"` to the request body
+  - If not found, prints an error and exits.
+- If you use `--csv` with `ff cm-list`, all fields from the API are included in the CSV output.
+
+#### Troubleshooting Custom Models
+- If you get an error about a custom model not being found, check the spelling or try using the assetId directly.
+- If multiple custom models have similar names, the CLI will use the first partial match it finds (case-insensitive).
+- For best results, use the full display name or assetId.
 
 ## Common Features
 

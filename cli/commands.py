@@ -76,39 +76,82 @@ def handle_command(args):
         sys.exit(1)
 
 def handle_image_command(args, access_token):
-    """Handle the image generation command with rate limiting and parallelism."""
+    """Handle the image generation command with rate limiting and parallelism, supporting custom models by displayName or assetId."""
+    import requests
+    import os
+    import sys
+    import time
+    # Standard models
+    STANDARD_MODELS = {'image3', 'image4', 'image4_standard', 'image4_ultra', 'ultra'}
     # Parse model variations first
-    model_versions = parse_model_variations(args.model, args.debug)
-    total_models = len(model_versions)
-
+    model_variations = parse_model_variations(args.model, args.debug)
+    resolved_model_versions = []
+    custom_model_asset_ids = {}
+    # Check each model variation
+    for model in model_variations:
+        model_stripped = model.strip()
+        if model_stripped in STANDARD_MODELS:
+            resolved_model_versions.append(model_stripped)
+        else:
+            # Query custom models API
+            api_key = os.environ.get('FIREFLY_SERVICES_CLIENT_ID')
+            if not api_key:
+                print("Error: FIREFLY_SERVICES_CLIENT_ID is not set in environment.")
+                sys.exit(1)
+            headers = {
+                'x-api-key': api_key,
+                'x-request-id': f'ffcli-{int(time.time())}',
+                'Authorization': f'Bearer {access_token}'
+            }
+            url = 'https://firefly-api.adobe.io/v3/custom-models'
+            try:
+                response = requests.get(url, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+                models = data.get('custom_models', [])
+                # Try to match by displayName (case-insensitive, allow partial match)
+                match = next((m for m in models if model_stripped.lower() == m.get('displayName', '').lower()), None)
+                if not match:
+                    # Try to match by assetId (exact)
+                    match = next((m for m in models if model_stripped == m.get('assetId', '')), None)
+                if not match:
+                    # Try partial match on displayName
+                    match = next((m for m in models if model_stripped.lower() in m.get('displayName', '').lower()), None)
+                if match:
+                    asset_id = match['assetId']
+                    resolved_model_versions.append(asset_id)
+                    custom_model_asset_ids[asset_id] = True
+                    if args.debug:
+                        print(f"Resolved custom model '{model_stripped}' to assetId: {asset_id}")
+                else:
+                    print(f"Error: Could not find a custom model with displayName or assetId matching '{model_stripped}'.")
+                    sys.exit(1)
+            except Exception as e:
+                print(f"Error looking up custom models: {e}")
+                sys.exit(1)
+    total_models = len(resolved_model_versions)
     # Parse size if provided, using the first model version for size mapping
     size = None
     if args.size:
         try:
-            size = parse_size(args.size, model_versions[0], args.debug)
+            size = parse_size(args.size, resolved_model_versions[0], args.debug)
         except ValueError as e:
             print(str(e))
             sys.exit(1)
-
     # Parse prompt variations
     prompts, variation_blocks = parse_prompt_variations(args.prompt)
     total_variations = len(prompts)
-
     # Parse style reference variations
     style_refs = parse_style_ref_variations(args.style_reference) if args.style_reference else [None]
     total_style_refs = len(style_refs)
-
     # Parse composition reference variations
     composition_refs = parse_style_ref_variations(args.composition_reference) if args.composition_reference else [None]
     total_composition_refs = len(composition_refs)
-
     # Calculate total number of generations
     total_generations = total_variations * total_models * total_style_refs * total_composition_refs * args.numVariations
-
     # Get throttle limit from environment
     throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
     rate_limiter = RateLimiter(throttle_limit, 60)
-
     if not args.silent:
         print(f'Generating {total_generations} total variations:')
         print(f'  • {total_variations} prompt variations')
@@ -117,7 +160,6 @@ def handle_image_command(args, access_token):
         print(f'  • {total_composition_refs} composition references')
         print(f'  • {args.numVariations} variations per combination')
         print(f'Using parallel processing with rate limit of {throttle_limit} calls per minute\n')
-
     def image_task(prompt, model_version, style_ref, composition_ref, j):
         rate_limiter.acquire()
         tokens = {
@@ -132,6 +174,8 @@ def handle_image_command(args, access_token):
         base_filename = get_variation_filename(args.output, prompt, args.prompt, tokens, args.debug)
         output_filename = get_unique_filename(base_filename, args.overwrite, args.debug)
         try:
+            # If this is a custom model, pass assetId as x-model-version header
+            is_custom = model_version in custom_model_asset_ids
             job_info = generate_image(
                 access_token=access_token,
                 prompt=prompt,
@@ -147,7 +191,8 @@ def handle_image_command(args, access_token):
                 style_ref_path=style_ref,
                 style_ref_strength=args.style_reference_strength,
                 composition_ref_path=composition_ref,
-                composition_ref_strength=args.composition_reference_strength
+                composition_ref_strength=args.composition_reference_strength,
+                custom_model=is_custom
             )
             if args.debug:
                 print(f"Job ID: {job_info['jobId']}")
@@ -168,20 +213,17 @@ def handle_image_command(args, access_token):
                 import traceback
                 traceback.print_exc()
             return False
-
     # Create a list to store all generation tasks
     generation_tasks = []
     current_generation = 0
-
     # Prepare the table header
     if not args.silent:
         print("Generation Tasks:")
         print(f"{'#':<4} {'Model':<15} {'Prompt':<40} {'SRef':<20} {'SRef-Strength':<15} {'CRef':<20} {'CRef-Strength':<15}")
         print("-" * 120)
-
     tasks = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=throttle_limit) as executor:
-        for model_version in model_versions:
+        for model_version in resolved_model_versions:
             for style_ref in style_refs:
                 for composition_ref in composition_refs:
                     for i, prompt in enumerate(prompts, 1):
