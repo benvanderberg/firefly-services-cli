@@ -177,3 +177,8 @@ cython_debug/
 .pypirc
 
 .DS_Store
+
+# Ignore JPEG and PNG images in the root of the project
+/*.jpg
+/*.jpeg
+/*.png
