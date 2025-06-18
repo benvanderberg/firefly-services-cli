@@ -76,13 +76,278 @@ def handle_command(args):
         sys.exit(1)
 
 def handle_image_command(args, access_token):
-    """Handle the image generation command with rate limiting and parallelism, supporting custom models by displayName or assetId."""
+    """Handle the image generation command with rate limiting and parallelism, supporting custom models by displayName or assetId, and CSV-driven batch input."""
     import requests
     import os
     import sys
     import time
+    import csv as csvmod
     # Standard models
     STANDARD_MODELS = {'image3', 'image4', 'image4_standard', 'image4_ultra', 'ultra'}
+    # Helper for single job
+    def run_image_job(prompt, model, output, style_ref, composition_ref, j, size, custom_model_asset_ids, rate_limiter=None):
+        tokens = {
+            'prompt': prompt,
+            'model': model,
+            'size': size,
+            'style_ref': style_ref,
+            'composition_ref': composition_ref,
+            'iteration': j + 1
+        }
+        base_filename = get_variation_filename(output, prompt, prompt, tokens, args.debug)
+        output_filename = get_unique_filename(base_filename, args.overwrite, args.debug)
+        try:
+            is_custom = model in custom_model_asset_ids
+            job_info = generate_image(
+                access_token=access_token,
+                prompt=prompt,
+                num_generations=1,
+                model_version=model,
+                content_class=args.content_class,
+                negative_prompt=args.negative_prompt,
+                prompt_biasing_locale=args.locale,
+                size=size,
+                seeds=args.seeds,
+                debug=args.debug,
+                visual_intensity=args.visual_intensity,
+                style_ref_path=style_ref,
+                style_ref_strength=args.style_reference_strength,
+                composition_ref_path=composition_ref,
+                composition_ref_strength=args.composition_reference_strength,
+                custom_model=is_custom
+            )
+            if args.debug:
+                print(f"Job ID: {job_info['jobId']}")
+                print("Polling for job completion...")
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug, rate_limiter)
+            if 'result' in result and 'outputs' in result['result']:
+                outputs = result['result']['outputs']
+                if outputs:
+                    image_url = outputs[0]['image']['url']
+                    if args.debug:
+                        print(f"Downloading image to {output_filename}...")
+                    download_file(image_url, output_filename, args.silent, args.debug)
+                    return True
+            return False
+        except Exception as e:
+            print(f"Error generating image: {str(e)}")
+            if args.debug:
+                import traceback
+                traceback.print_exc()
+            # Check if it's a 529 error (overloaded service)
+            if "529" in str(e) or "Too Many Requests" in str(e):
+                if args.debug:
+                    print("Detected 529 error - this task will be retried after all others complete")
+            return False
+    # CSV-driven batch mode
+    if getattr(args, 'csv_input', None):
+        csv_path = args.csv_input
+        subject_val = getattr(args, 'subject', None)
+        cli_model = getattr(args, 'model', None)
+        throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
+        rate_limiter = RateLimiter(throttle_limit, 60)
+        with open(csv_path, newline='', encoding='utf-8-sig') as csvfile:
+            reader = csvmod.DictReader(csvfile)
+            rows = list(reader)
+            # Normalize BOM in header for first row if present
+            if rows and any(k.startswith('\ufeff') for k in rows[0].keys()):
+                for row in rows:
+                    for k in list(row.keys()):
+                        if k.startswith('\ufeff'):
+                            row[k.lstrip('\ufeff')] = row.pop(k)
+        if not rows:
+            print(f"No rows found in CSV: {csv_path}")
+            sys.exit(1)
+        # Pre-fetch custom models if needed
+        custom_model_asset_ids = {}
+        all_models = set(row['Model'] for row in rows if row.get('Model'))
+        resolved_model_versions = []
+        
+        # Resolve CLI model first if provided
+        if cli_model:
+            cli_model_variations = parse_model_variations(cli_model, args.debug)
+            for model in cli_model_variations:
+                model_stripped = model.strip()
+                if model_stripped in STANDARD_MODELS:
+                    resolved_model_versions.append(model_stripped)
+                else:
+                    # Query custom models API for CLI model
+                    api_key = os.environ.get('FIREFLY_SERVICES_CLIENT_ID')
+                    if not api_key:
+                        print("Error: FIREFLY_SERVICES_CLIENT_ID is not set in environment.")
+                        sys.exit(1)
+                    headers = {
+                        'x-api-key': api_key,
+                        'x-request-id': f'ffcli-{int(time.time())}',
+                        'Authorization': f'Bearer {access_token}'
+                    }
+                    url = 'https://firefly-api.adobe.io/v3/custom-models'
+                    try:
+                        response = requests.get(url, headers=headers)
+                        response.raise_for_status()
+                        data = response.json()
+                        models = data.get('custom_models', [])
+                        match = next((m for m in models if model_stripped.lower() == m.get('displayName', '').lower()), None)
+                        if not match:
+                            match = next((m for m in models if model_stripped == m.get('assetId', '')), None)
+                        if not match:
+                            match = next((m for m in models if model_stripped.lower() in m.get('displayName', '').lower()), None)
+                        if match:
+                            asset_id = match['assetId']
+                            resolved_model_versions.append(asset_id)
+                            custom_model_asset_ids[asset_id] = True
+                            if args.debug:
+                                print(f"Resolved CLI custom model '{model_stripped}' to assetId: {asset_id}")
+                        else:
+                            print(f"Error: Could not find a custom model with displayName or assetId matching '{model_stripped}'.")
+                            sys.exit(1)
+                    except Exception as e:
+                        print(f"Error looking up custom models: {e}")
+                        sys.exit(1)
+        
+        # Now resolve CSV models
+        for model in all_models:
+            if model and model not in STANDARD_MODELS and model != '{Model}':
+                # Query custom models API
+                api_key = os.environ.get('FIREFLY_SERVICES_CLIENT_ID')
+                if not api_key:
+                    print("Error: FIREFLY_SERVICES_CLIENT_ID is not set in environment.")
+                    sys.exit(1)
+                headers = {
+                    'x-api-key': api_key,
+                    'x-request-id': f'ffcli-{int(time.time())}',
+                    'Authorization': f'Bearer {access_token}'
+                }
+                url = 'https://firefly-api.adobe.io/v3/custom-models'
+                try:
+                    response = requests.get(url, headers=headers)
+                    response.raise_for_status()
+                    data = response.json()
+                    models = data.get('custom_models', [])
+                    match = next((m for m in models if model.lower() == m.get('displayName', '').lower()), None)
+                    if not match:
+                        match = next((m for m in models if model == m.get('assetId', '')), None)
+                    if not match:
+                        match = next((m for m in models if model.lower() in m.get('displayName', '').lower()), None)
+                    if match:
+                        asset_id = match['assetId']
+                        custom_model_asset_ids[asset_id] = True
+                        custom_model_asset_ids[model] = True  # allow both
+                        if args.debug:
+                            print(f"Resolved CSV custom model '{model}' to assetId: {asset_id}")
+                    else:
+                        print(f"Error: Could not find a custom model with displayName or assetId matching '{model}'.")
+                        sys.exit(1)
+                except Exception as e:
+                    print(f"Error looking up custom models: {e}")
+                    sys.exit(1)
+        # Process each row
+        all_tasks = []
+        failed_tasks = []  # Track failed tasks for retry
+        current_generation = 0
+        throttle_pause = float(os.getenv('THROTTLE_PAUSE_SECONDS', 0.5))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=throttle_limit) as executor:
+            for row in rows:
+                prompt = row.get('Prompt', '').strip()
+                model = row.get('Model', '').strip() if 'Model' in row else None
+                output = row.get('Output', '').strip()
+                if not prompt or not output:
+                    print(f"Skipping row with missing Prompt or Output: {row}")
+                    continue
+                # Inject subject
+                if subject_val:
+                    prompt = prompt.replace('{subject}', subject_val)
+                    if model:
+                        model = model.replace('{subject}', subject_val)
+                    output = output.replace('{subject}', subject_val)
+                # If Model is {Model}, missing, or empty, use CLI model
+                if not model or model == '{Model}':
+                    model = resolved_model_versions[0] if resolved_model_versions else cli_model
+                else:
+                    # Resolve CSV model to assetId if it's a custom model
+                    if model not in STANDARD_MODELS:
+                        # Find the assetId for this model
+                        model_asset_id = None
+                        for asset_id, is_custom in custom_model_asset_ids.items():
+                            if asset_id == model or (isinstance(is_custom, str) and is_custom == model):
+                                model_asset_id = asset_id
+                                break
+                        if model_asset_id:
+                            model = model_asset_id
+                        # If not found, assume it's already an assetId
+                
+                # Parse model variations (should be rare in CSV, but support)
+                model_variations = [model]  # Use the resolved model directly
+                for model_version in model_variations:
+                    # Parse prompt variations (bracketed)
+                    prompts, _ = parse_prompt_variations(prompt)
+                    for prompt_var in prompts:
+                        # Use output as template (inject subject, etc.)
+                        out_path = output
+                        # Throttle
+                        rate_limiter.acquire()
+                        task_info = {
+                            'prompt': prompt_var,
+                            'model': model_version,
+                            'output': out_path,
+                            'style_ref': None,
+                            'composition_ref': None,
+                            'j': 0,
+                            'size': None,
+                            'custom_model_asset_ids': custom_model_asset_ids
+                        }
+                        task = executor.submit(run_image_job, prompt_var, model_version, out_path, None, None, 0, None, custom_model_asset_ids, rate_limiter)
+                        all_tasks.append((task, task_info))
+                
+                # Add delay between rows
+                if throttle_pause > 0:
+                    time.sleep(throttle_pause)
+            
+            # Process all tasks and track failures
+            for future, task_info in all_tasks:
+                try:
+                    result = future.result()
+                    if not result:
+                        # Task failed, add to retry list
+                        failed_tasks.append(task_info)
+                        if args.debug:
+                            print(f"Task failed: {task_info['prompt'][:50]}...")
+                except Exception as e:
+                    # Task raised an exception, add to retry list
+                    failed_tasks.append(task_info)
+                    if args.debug:
+                        print(f"Task failed with exception: {e} - {task_info['prompt'][:50]}...")
+        
+        # Retry failed tasks if any
+        if failed_tasks:
+            print(f"\nRetrying {len(failed_tasks)} failed tasks...")
+            retry_tasks = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=throttle_limit) as executor:
+                for task_info in failed_tasks:
+                    retry_task = executor.submit(
+                        run_image_job, 
+                        task_info['prompt'], 
+                        task_info['model'], 
+                        task_info['output'], 
+                        task_info['style_ref'], 
+                        task_info['composition_ref'], 
+                        task_info['j'], 
+                        task_info['size'], 
+                        task_info['custom_model_asset_ids'], 
+                        rate_limiter
+                    )
+                    retry_tasks.append(retry_task)
+                
+                for future in concurrent.futures.as_completed(retry_tasks):
+                    try:
+                        result = future.result()
+                        if not result:
+                            print("Task failed on retry")
+                    except Exception as e:
+                        print(f"Task failed on retry with exception: {e}")
+        
+        print("\nAll CSV-driven image generation tasks completed.")
+        return
     # Parse model variations first
     model_variations = parse_model_variations(args.model, args.debug)
     resolved_model_versions = []
@@ -108,7 +373,16 @@ def handle_image_command(args, access_token):
                 response = requests.get(url, headers=headers)
                 response.raise_for_status()
                 data = response.json()
+                
+                if args.debug:
+                    print("=== Full API Response ===")
+                    print(json.dumps(data, indent=2))
+                    print("=== End API Response ===\n")
+                
                 models = data.get('custom_models', [])
+                if not models:
+                    print('No custom models found.')
+                    return
                 # Try to match by displayName (case-insensitive, allow partial match)
                 match = next((m for m in models if model_stripped.lower() == m.get('displayName', '').lower()), None)
                 if not match:
@@ -197,7 +471,7 @@ def handle_image_command(args, access_token):
             if args.debug:
                 print(f"Job ID: {job_info['jobId']}")
                 print("Polling for job completion...")
-            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug, rate_limiter)
             if 'result' in result and 'outputs' in result['result']:
                 outputs = result['result']['outputs']
                 if outputs:
@@ -212,6 +486,10 @@ def handle_image_command(args, access_token):
             if args.debug:
                 import traceback
                 traceback.print_exc()
+            # Check if it's a 529 error (overloaded service)
+            if "529" in str(e) or "Too Many Requests" in str(e):
+                if args.debug:
+                    print("Detected 529 error - this task will be retried after all others complete")
             return False
     # Create a list to store all generation tasks
     generation_tasks = []
@@ -303,7 +581,7 @@ def handle_similar_image_command(args, access_token):
             if args.debug:
                 print(f"Job ID: {job_info['jobId']}")
                 print("Polling for job completion...")
-            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug, rate_limiter)
             if 'result' in result and 'outputs' in result['result']:
                 outputs = result['result']['outputs']
                 if outputs:
@@ -578,7 +856,7 @@ def handle_tts_command(args, access_token):
                             print("Polling for job completion...")
                         
                         # Poll the status URL until the job is complete
-                        result = check_job_status(response['statusUrl'], access_token, args.silent, args.debug)
+                        result = check_job_status(response['statusUrl'], access_token, args.silent, args.debug, rate_limiter)
                         
                         if result.get('status') == 'succeeded' and 'output' in result and 'url' in result['output']:
                             # Download the audio file
@@ -1226,7 +1504,7 @@ def handle_replace_bg_command(args, access_token):
     if not args.silent:
         print("\nAll background replacement tasks completed.")
 
-def check_job_status(status_url, access_token, silent=False, debug=False):
+def check_job_status(status_url, access_token, silent=False, debug=False, rate_limiter=None):
     """
     Poll the status URL until the job is complete.
     
@@ -1235,6 +1513,7 @@ def check_job_status(status_url, access_token, silent=False, debug=False):
         access_token (str): The authentication token
         silent (bool): Whether to suppress output messages
         debug (bool): Whether to show debug information
+        rate_limiter: Optional rate limiter for throttling requests
     
     Returns:
         dict: The completed job result
@@ -1249,6 +1528,10 @@ def check_job_status(status_url, access_token, silent=False, debug=False):
     }
 
     while True:
+        # Apply rate limiting if provided
+        if rate_limiter:
+            rate_limiter.acquire()
+            
         response = requests.get(status_url, headers=headers)
         response.raise_for_status()
         status_data = response.json()
@@ -1474,6 +1757,12 @@ def handle_list_custom_models_command(args, access_token):
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         data = response.json()
+        
+        if args.debug:
+            print("=== Full API Response ===")
+            print(json.dumps(data, indent=2))
+            print("=== End API Response ===\n")
+        
         models = data.get('custom_models', [])
         if not models:
             print('No custom models found.')
@@ -1498,12 +1787,23 @@ def handle_list_custom_models_command(args, access_token):
                 from rich.table import Table
                 from rich.console import Console
                 table = Table(show_header=True, header_style="bold magenta", show_lines=True)
-                table.add_column('Name', overflow="fold", max_width=16)
+                table.add_column('Name', overflow="fold", max_width=30)
                 table.add_column('Asset ID', overflow="fold", max_width=72)
-                table.add_column('Concept', overflow="fold", max_width=12)
-                table.add_column('Model', overflow="fold", max_width=10)
-                for row in models:
-                    table.add_row(*[str(cell) for cell in row.values()])
+                table.add_column('Training Mode', overflow="fold", max_width=20)
+                table.add_column('Base Model', overflow="fold", max_width=15)
+                
+                for model in models:
+                    display_name = model.get('displayName', '')
+                    asset_id = model.get('assetId', '')
+                    training_mode = model.get('trainingMode', '')
+                    base_model = model.get('baseModel', {}).get('name', '')
+                    
+                    table.add_row(
+                        display_name,
+                        asset_id,
+                        training_mode,
+                        base_model
+                    )
                 console = Console()
                 console.print(table)
             except ImportError:
@@ -1511,12 +1811,22 @@ def handle_list_custom_models_command(args, access_token):
                 # fallback to tabulate if available
                 try:
                     from tabulate import tabulate
-                    print(tabulate(models, headers=['Name', 'Asset ID', 'Concept', 'Model'], tablefmt='fancy_grid', maxcolwidths=[16, 72, 12, 10], stralign='left', numalign='left'))
+                    table_data = []
+                    for model in models:
+                        table_data.append([
+                            model.get('displayName', ''),
+                            model.get('assetId', ''),
+                            model.get('trainingMode', ''),
+                            model.get('baseModel', {}).get('name', '')
+                        ])
+                    print(tabulate(table_data, headers=['Name', 'Asset ID', 'Training Mode', 'Base Model'], tablefmt='fancy_grid', maxcolwidths=[30, 72, 20, 15], stralign='left', numalign='left'))
                 except ImportError:
-                    for row in [['Name', 'Asset ID', 'Concept', 'Model']] + models:
-                        print("\t".join(str(cell) for cell in row))
+                    # Plain text fallback
+                    print("Name\tAsset ID\tTraining Mode\tBase Model")
+                    for model in models:
+                        print(f"{model.get('displayName', '')}\t{model.get('assetId', '')}\t{model.get('trainingMode', '')}\t{model.get('baseModel', {}).get('name', '')}")
     except Exception as e:
         print(f"Error fetching custom models: {e}")
         if args.debug:
             import traceback
-            traceback.print_exc() 
+            traceback.print_exc()

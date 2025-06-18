@@ -117,6 +117,44 @@ After installation, you can use the CLI tool in two ways:
 - Speaker identification
 - Timestamp formatting
 
+### CSV-Driven Batch Image Generation
+
+You can generate images in batch using a CSV file. Use the `--csv-input` argument to specify the CSV file, and optionally `--subject` to inject a value into `{subject}` placeholders in your prompts, models, or output paths.
+
+**Environment Variables:**
+- `THROTTLE_LIMIT_FIREFLY`: Maximum concurrent requests (default: 5)
+- `THROTTLE_PAUSE_SECONDS`: Delay between processing CSV rows in seconds (default: 0.5)
+- `API_MAX_RETRIES`: Maximum retry attempts for server errors (default: 3)
+- `API_RETRY_DELAY`: Base delay for retry backoff in seconds (default: 2.0)
+
+**CSV Format:**
+- The CSV must have columns: `Prompt` and `Output`. The `Model` column is optional.
+- `Prompt`: The text prompt for image generation. Supports bracketed variations (e.g., `a [cat,dog] in a [garden,forest]`).
+- `Model` (optional): The model to use. Can be a standard model, a custom model display name/assetId, or `{Model}` to use the CLI `-m/--model` value. If omitted or empty, the CLI `-m/--model` value is used.
+- `Output`: The output file path. Supports tokens: `{subject}`, `{prompt}`, `{model}`, `{date}`, `{time}`, `{datetime}`, etc.
+
+**Usage Examples:**
+```bash
+# Basic CSV batch generation
+ff image --csv-input Prompts.csv --subject "Shantanu" -m "BOD - Shantanu Narayen"
+
+# With custom throttling
+export THROTTLE_LIMIT_FIREFLY=3
+export THROTTLE_PAUSE_SECONDS=1.0
+ff image --csv-input Prompts.csv --subject "Shantanu" -m "BOD - Shantanu Narayen"
+```
+
+**Features:**
+- Bracketed prompt variations: `[option1,option2]` expands to all combinations.
+- Model can be a standard model, custom model display name/assetId, or `{Model}`.
+- Output filenames can use tokens: `{prompt}`, `{model}`, `{var1}`, `{var2}`, `{subject}`, etc.
+- Full throttling and parallelism are supported.
+
+**Troubleshooting:**
+- If a custom model is not found, check the display name or assetId in the Firefly UI or with `ff cm-list`.
+- If you see errors about missing columns, ensure your CSV has `Prompt`, `Model`, and `Output` headers.
+- For debugging, use the `--debug` flag to see detailed output.
+
 ## Configuration
 
 Create a `.env` file in the project root with the following variables:

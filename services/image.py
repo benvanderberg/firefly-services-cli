@@ -12,104 +12,116 @@ def generate_image(access_token, prompt, num_generations=1, model_version='image
                   visual_intensity=None, style_ref_path=None, style_ref_strength=50,
                   composition_ref_path=None, composition_ref_strength=50, custom_model=False):
     """
-    Generate images using Adobe Firefly Services API.
-    
-    Args:
-        access_token (str): Adobe Firefly Services access token
-        prompt (str): Text prompt for image generation
-        num_generations (int): Number of images to generate
-        model_version (str): Model version to use
-        content_class (str): Content class for the image
-        negative_prompt (str): Negative prompt to guide generation
-        prompt_biasing_locale (str): Locale for prompt biasing
-        size (dict): Image size specification with width and height
-        seeds (list): List of seeds for generation
-        debug (bool): Enable debug output
-        visual_intensity (int): Visual intensity of the generated image (1-10)
-        style_ref_path (str): Path to style reference image file
-        style_ref_strength (int): Strength of the style reference (1-100)
-        composition_ref_path (str): Path to composition reference image file
-        composition_ref_strength (int): Strength of the composition reference (1-100)
-        custom_model (bool): If True, treat model_version as a custom model assetId and set x-model-version header to 'image4_custom' and customModelId in body
-    
-    Returns:
-        dict: Job information including job ID and status
+    Generate images using the Firefly API with retry logic for transient errors.
     """
-    url = "https://firefly-api.adobe.io/v3/images/generate-async"
+    max_retries = int(os.getenv('API_MAX_RETRIES', 3))
+    base_delay = float(os.getenv('API_RETRY_DELAY', 2.0))
     
-    headers = {
-        "Authorization": f"Bearer {access_token}",
-        "x-api-key": os.environ['FIREFLY_SERVICES_CLIENT_ID'],
-        "Content-Type": "application/json"
-    }
+    for attempt in range(max_retries + 1):
+        try:
+            return _generate_image_internal(
+                access_token, prompt, num_generations, model_version, content_class,
+                negative_prompt, prompt_biasing_locale, size, seeds, debug,
+                visual_intensity, style_ref_path, style_ref_strength,
+                composition_ref_path, composition_ref_strength, custom_model
+            )
+        except requests.HTTPError as e:
+            # Retry on 5xx server errors (including 504 Gateway Timeout)
+            if e.response and 500 <= e.response.status_code < 600:
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    if debug:
+                        print(f"Server error {e.response.status_code}: {e}. Retrying in {delay:.1f} seconds... (attempt {attempt + 1}/{max_retries + 1})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    if debug:
+                        print(f"Max retries ({max_retries}) reached for server error {e.response.status_code}")
+            # Re-raise non-retryable errors
+            raise
+        except requests.RequestException as e:
+            # Retry on network errors
+            if attempt < max_retries:
+                delay = base_delay * (2 ** attempt)
+                if debug:
+                    print(f"Network error: {e}. Retrying in {delay:.1f} seconds... (attempt {attempt + 1}/{max_retries + 1})")
+                time.sleep(delay)
+                continue
+            else:
+                if debug:
+                    print(f"Max retries ({max_retries}) reached for network error")
+                raise
+
+def _generate_image_internal(access_token, prompt, num_generations=1, model_version='image3', content_class='photo',
+                           negative_prompt=None, prompt_biasing_locale=None, size=None, seeds=None, debug=False,
+                           visual_intensity=None, style_ref_path=None, style_ref_strength=50,
+                           composition_ref_path=None, composition_ref_strength=50, custom_model=False):
+    """
+    Internal function to generate images (without retry logic).
+    """
+    # Upload style reference if provided
+    style_ref_url = None
+    if style_ref_path:
+        style_ref_url = upload_to_azure_storage(style_ref_path)
     
+    # Upload composition reference if provided
+    composition_ref_url = None
+    if composition_ref_path:
+        composition_ref_url = upload_to_azure_storage(composition_ref_path)
+    
+    # Prepare the request payload
     data = {
         "prompt": prompt,
         "numVariations": num_generations,
         "contentClass": content_class
     }
     
-    if custom_model:
-        headers["x-model-version"] = "image4_custom"
-        data["customModelId"] = model_version
-    else:
-        data["modelVersion"] = model_version
-    
+    # Add optional parameters if provided
     if negative_prompt:
         data["negativePrompt"] = negative_prompt
-    
     if prompt_biasing_locale:
         data["promptBiasingLocale"] = prompt_biasing_locale
-    
     if size:
-        if not (isinstance(size, dict) and 'width' in size and 'height' in size):
-            raise ValueError("Size must be a dict with 'width' and 'height' keys.")
         data["size"] = size
-    
     if seeds:
         data["seeds"] = seeds
-    
-    if visual_intensity:
+    if visual_intensity is not None:
         data["visualIntensity"] = visual_intensity
-    
-    # Style reference
-    if style_ref_path:
-        # Upload or resolve style_ref_path to a URL if needed
-        style_url = style_ref_path
-        if style_url.startswith('file://') or os.path.exists(style_url):
-            style_url = upload_to_azure_storage(style_url, debug=debug)
-        data["styles"] = [{
-            "imageReference": {
-                "source": {"url": style_url}
-            },
+    if style_ref_url:
+        data["styleReference"] = {
+            "source": {"url": style_ref_url},
             "strength": style_ref_strength
-        }]
-    
-    # Composition reference (structure)
-    if composition_ref_path:
-        # Upload or resolve composition_ref_path to a URL if needed
-        cref_url = composition_ref_path
-        if cref_url.startswith('file://') or os.path.exists(cref_url):
-            cref_url = upload_to_azure_storage(cref_url, debug=debug)
-        data["structure"] = {
-            "imageReference": {
-                "source": {"url": cref_url}
-            },
+        }
+    if composition_ref_url:
+        data["compositionReference"] = {
+            "source": {"url": composition_ref_url},
             "strength": composition_ref_strength
         }
+    if custom_model:
+        data["customModelId"] = model_version
+    
+    # Prepare headers
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json',
+        'x-api-key': os.environ['FIREFLY_SERVICES_CLIENT_ID']
+    }
+    
+    # Set model version header based on whether it's a custom model
+    if custom_model:
+        headers['x-model-version'] = 'image4_custom'
+    else:
+        headers['x-model-version'] = model_version
+    
+    url = 'https://firefly-api.adobe.io/v3/images/generate-async'
     
     if debug:
         print("Request data:", json.dumps(data, indent=2))
         print("Request headers:", json.dumps(headers, indent=2))
     
-    try:
-        response = requests.post(url, headers=headers, json=data)
-        response.raise_for_status()
-        return response.json()
-    except requests.HTTPError as e:
-        if debug and e.response is not None:
-            print("API Error Response:", e.response.text)
-        raise
+    response = requests.post(url, headers=headers, json=data)
+    response.raise_for_status()
+    return response.json()
 
 def normalize_model_name(model_name, debug=False):
     """

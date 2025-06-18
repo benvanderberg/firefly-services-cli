@@ -11,8 +11,8 @@ def create_parser():
 
     # Image generation command
     image_parser = subparsers.add_parser('image', aliases=['img'], help='Generate images')
-    image_parser.add_argument('-prompt', '--prompt', required=True, help='Text prompt for image generation. Use [option1,option2,...] for variations')
-    image_parser.add_argument('-o', '--output', required=True, help='Output file path for the generated image. Supports tokens: {prompt}, {date}, {time}, {datetime}, {seed}, {sr}, {model}, {width}, {height}, {dimensions}, {var1}, {var2}, {n}, etc.')
+    image_parser.add_argument('-prompt', '--prompt', required=False, help='Text prompt for image generation. Use [option1,option2,...] for variations')
+    image_parser.add_argument('-o', '--output', required=False, help='Output file path for the generated image. Supports tokens: {prompt}, {date}, {time}, {datetime}, {seed}, {sr}, {model}, {width}, {height}, {dimensions}, {var1}, {var2}, {n}, etc.')
     image_parser.add_argument('-n', '--numVariations', type=int, default=1, choices=range(1, 5),
                             help='Number of variations to generate (1-4, default: 1)')
     image_parser.add_argument('-m', '--model', default='image3',
@@ -35,6 +35,13 @@ def create_parser():
     image_parser.add_argument('-sref-strength', '--style-reference-strength', type=int, default=50, choices=range(1, 101), metavar='[1-100]', help='Strength of the style reference (1-100, default: 50)')
     image_parser.add_argument('-cref', '--composition-reference', help='Path to a composition reference image file. Can be a single file or variations in [file1,file2,...] format.')
     image_parser.add_argument('-cref-strength', '--composition-reference-strength', type=int, default=50, choices=range(1, 101), metavar='[1-100]', help='Strength of the composition reference (1-100, default: 50)')
+    image_parser.add_argument('--csv-input', help='CSV file with columns Prompt,Model,Output for batch image generation')
+    image_parser.add_argument('--subject', help='Value to inject for {subject} in CSV-driven batch image generation')
+    # Add a custom validation function after parsing
+    def image_command_validate(args):
+        if not args.csv_input and (not args.prompt or not args.output):
+            parser.error('You must provide either both -prompt/--prompt and -o/--output, or --csv-input.')
+    image_parser.set_defaults(validate=image_command_validate)
 
     # Similar image generation command
     similar_parser = subparsers.add_parser('similar-image', aliases=['sim'], help='Generate similar images based on a reference image')
@@ -171,5 +178,6 @@ def create_parser():
     # List custom models command
     models_parser = subparsers.add_parser('models', aliases=['cm-list', 'ml'], help='List custom models')
     models_parser.add_argument('--csv', action='store_true', help='Output as CSV instead of table')
+    models_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information including full API response')
 
     return parser 
