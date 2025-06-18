@@ -168,4 +168,8 @@ def create_parser():
     replace_bg_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
     replace_bg_parser.add_argument('-ow', '--overwrite', action='store_true', help='Overwrite existing files')
 
+    # List custom models command
+    models_parser = subparsers.add_parser('models', aliases=['cm-list', 'ml'], help='List custom models')
+    models_parser.add_argument('--csv', action='store_true', help='Output as CSV instead of table')
+
     return parser 

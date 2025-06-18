@@ -12,6 +12,8 @@ from typing import List, Dict, Any, Optional, Union, Tuple
 from dotenv import load_dotenv
 import re
 import glob
+import csv
+import io
 
 from utils.auth import retrieve_access_token
 from utils.storage import upload_to_azure_storage
@@ -67,6 +69,8 @@ def handle_command(args):
         handle_mask_command(args, access_token)
     elif args.command == 'replace-bg':
         handle_replace_bg_command(args, access_token)
+    elif args.command in ['models', 'cm-list', 'ml']:
+        handle_list_custom_models_command(args, access_token)
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
@@ -1396,4 +1400,81 @@ def add_transcribe_command(subparsers):
     transcribe_parser.add_argument('--output-type', choices=['text', 'markdown', 'pdf'], default='text',
                                  help='Output format (text, markdown, or pdf)')
     transcribe_parser.add_argument('-d', '--debug', action='store_true', help='Enable debug output')
-    transcribe_parser.set_defaults(func=handle_transcribe_command) 
+    transcribe_parser.set_defaults(func=handle_transcribe_command)
+
+def handle_list_custom_models_command(args, access_token):
+    """List available custom models for Firefly."""
+    import csv
+    import io
+    def truncate(val, length=16):
+        if not val:
+            return ''
+        return val if len(val) <= length else val[:length-3] + '...'
+    def base_model_short(name):
+        if not name:
+            return ''
+        if 'image3' in name:
+            return 'image3'
+        if 'image4' in name:
+            return 'image4'
+        return name.split('_')[0]
+    api_key = os.environ.get('FIREFLY_SERVICES_CLIENT_ID')
+    if not api_key:
+        print("Error: FIREFLY_SERVICES_CLIENT_ID is not set in environment.")
+        sys.exit(1)
+    headers = {
+        'x-api-key': api_key,
+        'x-request-id': f'ffcli-{int(time.time())}',
+        'Authorization': f'Bearer {access_token}'
+    }
+    url = 'https://firefly-api.adobe.io/v3/custom-models'
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+        models = data.get('custom_models', [])
+        if not models:
+            print('No custom models found.')
+            return
+        # Output all fields from the response
+        if args.csv:
+            # Collect all unique keys from all models
+            all_keys = set()
+            for m in models:
+                all_keys.update(m.keys())
+            # Sort keys for consistency
+            all_keys = sorted(all_keys)
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(all_keys)
+            for m in models:
+                row = [m.get(k, '') for k in all_keys]
+                writer.writerow(row)
+            print(output.getvalue())
+        else:
+            try:
+                from rich.table import Table
+                from rich.console import Console
+                table = Table(show_header=True, header_style="bold magenta", show_lines=True)
+                table.add_column('Name', overflow="fold", max_width=16)
+                table.add_column('Asset ID', overflow="fold", max_width=72)
+                table.add_column('Concept', overflow="fold", max_width=12)
+                table.add_column('Model', overflow="fold", max_width=10)
+                for row in models:
+                    table.add_row(*[str(cell) for cell in row.values()])
+                console = Console()
+                console.print(table)
+            except ImportError:
+                print("The 'rich' library is required for pretty table output. Install it with: pip install rich")
+                # fallback to tabulate if available
+                try:
+                    from tabulate import tabulate
+                    print(tabulate(models, headers=['Name', 'Asset ID', 'Concept', 'Model'], tablefmt='fancy_grid', maxcolwidths=[16, 72, 12, 10], stralign='left', numalign='left'))
+                except ImportError:
+                    for row in [['Name', 'Asset ID', 'Concept', 'Model']] + models:
+                        print("\t".join(str(cell) for cell in row))
+    except Exception as e:
+        print(f"Error fetching custom models: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc() 

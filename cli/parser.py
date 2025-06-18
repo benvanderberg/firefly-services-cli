@@ -62,6 +62,7 @@ def parse_args():
 
     # List custom models command
     models_parser = subparsers.add_parser('models', aliases=['cm-list', 'ml'], parents=[common_args], help='List custom models')
+    models_parser.add_argument('--csv', action='store_true', help='Output as CSV instead of table')
 
     # Create custom model command
     create_model_parser = subparsers.add_parser('create-model', aliases=['cm-create', 'mc'], parents=[common_args], help='Create a custom model')

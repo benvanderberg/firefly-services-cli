@@ -1,6 +1,28 @@
 # ff - Adobe Firefly Services CLI
 
-A command-line interface for Adobe Firefly Services, providing easy access to image generation, text-to-speech, dubbing, and transcription capabilities.
+A command-line interface for Adobe Firefly Services, providing easy access to image generation, text-to-speech, dubbing, and transcription capabilities. 
+
+## Why Use ff CLI?
+
+The ff CLI tool streamlines your creative workflow by providing direct command-line access to Adobe's powerful Firefly Services. Whether you're a developer, content creator, or digital marketer, this tool eliminates the need to navigate through web interfaces or write complex API integrations.
+
+**Key Benefits:**
+- **Batch Processing**: Generate multiple images, convert text to speech, or transcribe audio files in bulk
+- **Automation**: Integrate Adobe Firefly capabilities into your scripts, CI/CD pipelines, or automated workflows
+- **Rapid Prototyping**: Quickly test ideas and generate content without leaving your terminal
+- **Developer-Friendly**: Perfect for incorporating AI-generated content into applications, websites, or digital products
+- **Time Efficiency**: Skip the web interface and generate content directly from your command line
+- **Scriptable**: Combine with other command-line tools for powerful content generation pipelines
+
+**Perfect for:**
+- Content creators who need to generate multiple variations of images or audio
+- Developers building applications that require AI-generated assets
+- Marketing teams creating campaign materials at scale
+- Researchers and experimenters exploring AI content generation
+- Anyone who prefers command-line tools over web interfaces
+
+
+
 
 ## Quick Installation
 
@@ -70,7 +92,7 @@ After installation, you can use the CLI tool in two ways:
 - **Generative Fill:** Fill masked areas in images with AI-generated content
 - **Generative Expand:** Expand images beyond their original boundaries
 - **Similar Image Generation:** Create variations of existing images
-- **Background Replacement:** Replace image backgrounds with AI-generated content
+- **Background Replacement:** Replace image backgrounds with AI-generated content. This uses a combination of generating the mask, using Imagemagick to invert the mask, and then use Generative Fill to fill in the image.
 - **Mask Generation:** Create masks for images with optional optimization and post-processing
 
 ### Text-to-Speech
@@ -139,17 +161,55 @@ A SAS (Shared Access Signature) token is required to securely upload files to Az
 ### Image Generation
 Generate images using text prompts with various models and styles.
 
+To create a basic image:
 ```bash
 ff image -p "your prompt" -o output.jpg
 ```
 
+This will generate an image using Firefly Image 4 and will include the 
+```bash
+ff image -p "a puppy on a giraffe" -m image4 -o "output_{model}.jpg" -s widescreen
+```
 Options:
-- `-p, --prompt`: Text prompt for image generation
-- `-m, --model`: Model version (e.g., "firefly-2.0")
-- `-s, --size`: Image size (e.g., "1024x1024")
+- `-p, --prompt`: Your text description of the image
+- `-m, --model`: Model version. Available options:
+  - `image3`: Standard Image 3 model
+  - `image4`: Standard Image 4 model
+  - `image4_standard`: Standard Image 4 model (alias for image4)
+  - `image4_ultra`: Ultra Image 4 model
+  - `ultra`: Ultra Image 4 model (alias for image4_ultra)
+- `-s, --size`: Image size. You can use either:
+  - Preset names:
+    - `square`: 1024x1024 (1:1 ratio)
+    - `portrait`: 1024x1408 (3:4 ratio)
+    - `landscape`: 1408x1024 (4:3 ratio)
+    - `widescreen`: 1344x768 (16:9 ratio)
+  - Custom dimensions in "WIDTHxHEIGHT" format (e.g., "1024x1024")
+  - Supported dimensions:
+    - Square (1:1): 1024x1024, 2048x2048
+    - Portrait (3:4): 1024x1408, 1792x2304
+    - Landscape (4:3): 1408x1024, 2304x1792
+    - Widescreen (16:9): 1344x768, 2688x1536
+    - Other ratios: 1152x896, 896x1152, 1216x832, 832x1216
+- `-vi, --visual-intensity`: Control the overall intensity of image characteristics like contrast, shadows, and hue (1-10, where 1 is subtle and 10 is very intense)
+- `-sref, --style-reference`: Path to a style reference image file that influences the artistic style of the generated image
+- `-sref-strength, --style-reference-strength`: How strongly the style reference affects the output (1-100, default: 50)
+- `-cref, --composition-reference`: Path to a composition reference image that influences the structure and layout
+- `-cref-strength, --composition-reference-strength`: How strongly the composition reference affects the output (1-100, default: 50)
 - `-n, --numVariations`: Number of variations (1-4)
-- `-o, --output`: Output file path
-- `-d, --debug`: Enable debug output
+- `-o, --output`: Where to save the image
+
+Examples with reference images and intensity:
+```bash
+# Generate with high visual intensity
+ff image -p "a futuristic city" -vi 9 -o city.jpg
+
+# Use a style reference image
+ff image -p "a portrait" -sref style_photo.jpg -sref-strength 75 -o portrait.jpg
+
+# Use both style and composition references
+ff image -p "a landscape" -sref art_style.jpg -sref-strength 60 -cref composition.jpg -cref-strength 80 -o landscape.jpg
+```
 
 #### Prompt Variations
 You can include multiple options in your prompt using square brackets with comma-separated values. The CLI will generate all possible combinations of these variations.
@@ -185,38 +245,79 @@ Available model versions:
 ### Background Replacement
 Replace image backgrounds with AI-generated content.
 
+#### Background Replacement
+Replace image backgrounds:
 ```bash
-# Single file
-ff replace-bg -i input.jpg -p "a [red,green,blue] sky" -o output_{var1}.jpg
+ff replace-bg -i input.jpg -p "a cosmic nebula" -o output.jpg
+```
 
-# Multiple files using wildcard (note the quotes around the pattern)
-ff replace-bg -i "sample-files/*.jpg" -p "a cosmic nebula in space" -o nebulaBag_{input_filename}.jpg
+Examples with variations and tokens:
+```bash
+# Generate multiple background variations
+ff replace-bg -i portrait.jpg -p "a [sunset,sunrise,moonlit] [beach,mountain,forest]" -o bg_{var1}_{var2}.jpg
+
+# Process multiple files with wildcards and use input filename token
+ff replace-bg -i "photos/*.jpg" -p "a professional studio background" -o "processed/studio_{input_filename}.jpg"
+
+# Use date/time tokens for organization
+ff replace-bg -i selfie.jpg -p "a [modern office,cozy cafe,outdoor garden]" -o "backgrounds/{date}/{input_filename}_{var1}_{time}.jpg"
+
+# Combine multiple tokens
+ff replace-bg -i "portraits/*.jpg" -p "a [blue,green,purple] gradient background" -o "output/{input_filename}_bg_{var1}_{datetime}.jpg"
 ```
 
 Options:
 - `-i, --input`: Input image file or pattern (supports wildcards, must be quoted)
-- `-p, --prompt`: Background prompt with optional variations
+- `-p, --prompt`: Background prompt with optional variations in [option1,option2] format
 - `-o, --output`: Output file path with tokens:
-  - `{var1}`: Variation number
+  - `{var1}`, `{var2}`: Variation numbers from prompt variations
   - `{input_filename}`: Original input filename without extension
+  - `{date}`: Current date (YYYY-MM-DD)
+  - `{time}`: Current time (HH-MM-SS)
+  - `{datetime}`: Current date and time (YYYY-MM-DD_HH-MM-SS)
 - `-d, --debug`: Enable debug output
 
-Note: When using wildcards in the input pattern, make sure to quote the pattern (e.g., `"sample-files/*.jpg"`) to prevent shell expansion.
+Note: When using wildcards in the input pattern, make sure to quote the pattern (e.g., `"photos/*.jpg"`) to prevent shell expansion.
 
 ### Generative Fill
-Fill masked areas in images with AI-generated content.
-
+Fill masked areas in images:
 ```bash
 ff fill -i input.jpg -m mask.jpg -p "your prompt" -o output.jpg
 ```
 
+Examples with variations and tokens:
+```bash
+# Generate multiple fill variations
+ff fill -i photo.jpg -m mask.png -p "a [red,blue,green] [sports car,motorcycle,bicycle]" -o "filled_{var1}_{var2}.jpg"
+
+# Process multiple images with the same mask
+ff fill -i "photos/*.jpg" -m universal_mask.png -p "a beautiful garden with flowers" -o "filled/{input_filename}_garden_{datetime}.jpg"
+
+# Use different masks for different effects
+ff fill -i portrait.jpg -m "[face_mask.png,background_mask.png]" -p "a [happy,serious,surprised] expression" -o "expressions/{input_filename}_{var1}_{var2}_{time}.jpg"
+
+# Batch process with organized output
+ff fill -i "originals/*.jpg" -m "masks/{input_filename}_mask.png" -p "a [sunny,cloudy,starry] sky" -o "results/{date}/{input_filename}_sky_{var1}.jpg"
+
+# Combine with visual intensity for different effects
+ff fill -i base.jpg -m area_mask.png -p "a magical forest" -vi 8 -o "magic_{datetime}.jpg"
+```
+
 Options:
-- `-i, --input`: Input image file
-- `-m, --mask`: Mask image file
-- `-p, --prompt`: Fill prompt
-- `-o, --output`: Output file path
-- `--mask-invert`: Invert the mask before use
+- `-i, --input`: Input image file or pattern (supports wildcards, must be quoted)
+- `-m, --mask`: Mask image file that defines areas to fill (white areas will be filled, black areas preserved)
+- `-p, --prompt`: Fill prompt with optional variations in [option1,option2] format
+- `-o, --output`: Output file path with tokens:
+  - `{var1}`, `{var2}`: Variation numbers from prompt variations
+  - `{input_filename}`: Original input filename without extension
+  - `{date}`: Current date (YYYY-MM-DD)
+  - `{time}`: Current time (HH-MM-SS)
+  - `{datetime}`: Current date and time (YYYY-MM-DD_HH-MM-SS)
+- `-vi, --visual-intensity`: Control intensity of the fill effect (1-10)
+- `--mask-invert`: Invert the mask before use (fill black areas instead of white)
 - `-d, --debug`: Enable debug output
+
+Note: Mask images should have white areas where you want to fill content and black areas where you want to preserve the original image.
 
 ### Image Expansion
 Expand images beyond their original boundaries.
@@ -257,8 +358,7 @@ ff tts -f input.txt -v "[John,Maria]" -vs "[Casual,Happy]" -o "outputs/speech_{v
 
 Options:
 - `-f, --file`: Input text file
-- `-t, --text`: Direct text input
-- `-v, --voice`: Voice names (comma-separated)
+- `-t, --text`: Direct text input- `-v, --voice`: Voice names (comma-separated)
 - `-vs, --voice-style`: Voice styles (comma-separated)
 - `-o, --output`: Output file path with tokens
 - `-l, --locale`: Locale code (e.g., "en-US")
@@ -302,6 +402,29 @@ List all available voices for text-to-speech.
 ff voices
 ```
 
+### List Custom Models
+List all available custom models for your Firefly credentials.
+
+```bash
+ff cm-list
+```
+
+Output as a table:
+```
++----------------------+----------+---------------+---------------------+------------+-------------------------------+---------------------------+---------------------------+---------+------------------------------------------+-------------------------------+---------+
+| Display Name         | Version  | Training Mode | Base Model          | Concept ID | Sample Prompt                 | Created                   | Modified                  | State   | Asset ID                                 | Asset Name                    | Size    |
++======================+==========+===============+=====================+============+===============================+===========================+===========================+=========+==========================================+===============================+=========+
+| BOD - Shantanu Narayen | 1        | subject       | image4_custom 4.0.0 | Shantanu   | Shantanu playing guitar ...   | 2025-06-17T22:16:36.746Z  | 2025-06-18T00:16:58.160Z  | published | urn:aaid:sc:VA6C2:0091660b-...           | BOD - Shantanu Narayen.ffcustommodel | 27.29 GB |
+| Vacation             | 1        | style         | image3_custom 3.0.0 |            | an umbrella with a beach ...  | 2025-02-27T06:25:49.120Z  | 2025-02-27T07:05:18.993Z  | published | urn:aaid:sc:VA6C2:03b84e6d-...           | Vacation.ffcustommodel         | 11.31 GB |
+| ...                  | ...      | ...           | ...                 | ...        | ...                           | ...                       | ...                       | ...     | ...                                      | ...                           | ...     |
++----------------------+----------+---------------+---------------------+------------+-------------------------------+---------------------------+---------------------------+---------+------------------------------------------+-------------------------------+---------+
+```
+
+Output as CSV:
+```bash
+ff cm-list --csv
+```
+
 ## Common Features
 
 ### Output Filename Tokens
@@ -333,10 +456,17 @@ Add `-d` or `--debug` to any command to enable detailed debug output, including:
 - Rate limiting information
 
 ### Silent Mode
-Add `-s` or `--silent` to suppress progress messages and only show errors.
+Add `-s` or `--silent` to minimize output:
+```bash
+ff image -p "sunset" -s
+```
 
 ### Overwrite Protection
-By default, the CLI will not overwrite existing files. Use `--overwrite` to allow overwriting of existing files.
+
+By default, the CLI will not overwrite existing files. Use `--overwrite` to allow overwriting of existing files:
+```bash
+ff image -p "sunset" -o existing_file.jpg --overwrite
+```
 
 ## Directory Structure
 
@@ -359,10 +489,35 @@ firefly-services-cli/
     └── settings.py      # Configuration settings
 ```
 
+## Getting Help
+
+- List all available voices:
+  ```bash
+  ff voices
+  ```
+- Get help on any command:
+  ```bash
+  ff image --help
+  ```
+
+## Troubleshooting
+
+1. **Command not found**
+   - Make sure you've added the bin directory to your PATH
+   - Try using the full path: `./bin/ff [command]`
+
+2. **Authentication errors**
+   - Check your `.env` file for correct credentials
+   - Ensure your Adobe Firefly Services account is active
+
+3. **File upload errors**
+   - Verify your Azure Storage configuration
+   - Check if your SAS token is still valid
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the LICENSE file for details.
