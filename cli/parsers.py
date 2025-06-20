@@ -175,6 +175,15 @@ def create_parser():
     replace_bg_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
     replace_bg_parser.add_argument('-ow', '--overwrite', action='store_true', help='Overwrite existing files')
 
+    # Video generation command
+    video_parser = subparsers.add_parser('video', help='Generate videos')
+    video_parser.add_argument('-p', '--prompt', required=True, help='Text prompt for video generation')
+    video_parser.add_argument('-s', '--size', required=True, help='Video size (e.g., "1080x1080", "1080p", "sq1080p")')
+    video_parser.add_argument('-o', '--output', required=True, help='Output file path (.mp4)')
+    video_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information')
+    video_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
+    video_parser.add_argument('-ow', '--overwrite', action='store_true', help='Overwrite existing files')
+
     # List custom models command
     models_parser = subparsers.add_parser('models', aliases=['cm-list', 'ml'], help='List custom models')
     models_parser.add_argument('--csv', action='store_true', help='Output as CSV instead of table')

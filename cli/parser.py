@@ -86,4 +86,11 @@ def parse_args():
     replace_bg_parser.add_argument('-o', '--output', required=True, help='Output file path')
     replace_bg_parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files')
 
+    # Video generation command
+    video_parser = subparsers.add_parser('video', parents=[common_args], help='Generate videos')
+    video_parser.add_argument('-p', '--prompt', required=True, help='Text prompt for video generation')
+    video_parser.add_argument('-s', '--size', required=True, help='Video size (e.g., "1080x1080", "1080p", "sq1080p")')
+    video_parser.add_argument('-o', '--output', required=True, help='Output file path (.mp4)')
+    video_parser.add_argument('--overwrite', action='store_true', help='Overwrite existing files')
+
     return parser.parse_args() 

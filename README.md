@@ -88,6 +88,8 @@ After installation, you can use the CLI tool in two ways:
 - **Rate-limited parallel image generation:** Generate multiple image variations in parallel, with automatic throttling to respect the `THROTTLE_LIMIT_FIREFLY` environment variable (default: 5 calls per 60 seconds).
 - **Configurable throttle limit:** Set the maximum number of API calls per minute using the `THROTTLE_LIMIT_FIREFLY` variable in your `.env` file.
 
+### Video Generation
+
 ### Image Editing
 - **Generative Fill:** Fill masked areas in images with AI-generated content
 - **Generative Expand:** Expand images beyond their original boundaries
@@ -123,7 +125,10 @@ You can generate images in batch using a CSV file. Use the `--csv-input` argumen
 
 **Environment Variables:**
 - `THROTTLE_LIMIT_FIREFLY`: Maximum concurrent requests (default: 5)
+- `THROTTLE_PERIOD_SECONDS`: Time period for rate limiting in seconds (default: 60)
+- `THROTTLE_MIN_DELAY_SECONDS`: Minimum delay between API calls in seconds (default: 0.0)
 - `THROTTLE_PAUSE_SECONDS`: Delay between processing CSV rows in seconds (default: 0.5)
+- `THROTTLE_STATUS_REQUESTS`: Whether to throttle status polling requests (default: true)
 - `API_MAX_RETRIES`: Maximum retry attempts for server errors (default: 3)
 - `API_RETRY_DELAY`: Base delay for retry backoff in seconds (default: 2.0)
 
@@ -140,7 +145,10 @@ ff image --csv-input Prompts.csv --subject "Shantanu" -m "BOD - Shantanu Narayen
 
 # With custom throttling
 export THROTTLE_LIMIT_FIREFLY=3
+export THROTTLE_PERIOD_SECONDS=120
+export THROTTLE_MIN_DELAY_SECONDS=2.0
 export THROTTLE_PAUSE_SECONDS=1.0
+export THROTTLE_STATUS_REQUESTS=false
 ff image --csv-input Prompts.csv --subject "Shantanu" -m "BOD - Shantanu Narayen"
 ```
 
@@ -162,6 +170,7 @@ Create a `.env` file in the project root with the following variables:
 ```bash
 FIREFLY_SERVICES_CLIENT_ID=your_client_id
 FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret
+FIREFLY_SERVICES_SCOPE=openid,AdobeID,session,additional_info,read_organizations,firefly_api,ff_apis
 ```
 
 ## Azure Storage Configuration
@@ -279,6 +288,51 @@ Available model versions:
 - `image4_standard`: Standard Image 4 model (alias for image4)
 - `image4_ultra`: Ultra Image 4 model
 - `ultra`: Ultra Image 4 model (alias for image4_ultra)
+
+### Video Generation
+Generate videos using text prompts with various sizes.
+
+```bash
+ff video -p "a monkey flying in space" -s 1080x1080 -o output.mp4
+```
+
+Options:
+- `-p, --prompt`: Your text description of the video
+- `-s, --size`: Video size. Available options:
+  - `960x540`: Landscape 960x540
+  - `540x960`: Portrait 540x960
+  - `540x540` or `sq540p`: Square 540x540
+  - `1280x720` or `720p`: Landscape 1280x720
+  - `720x1280` or `v720p`: Portrait 720x1280
+  - `720x720` or `sq720p`: Square 720x720
+  - `1920x1080` or `1080p`: Landscape 1920x1080
+  - `1080x1920` or `v1080p`: Portrait 1080x1920
+  - `1080x1080` or `sq1080p`: Square 1080x1080
+- `-o, --output`: Output file path (must have .mp4 extension)
+- `--overwrite`: Overwrite existing files
+- `--debug`: Enable debug output
+- `--silent`: Suppress output messages
+
+Examples:
+```bash
+# Generate a square video
+ff video -p "a cat playing with a ball" -s sq1080p -o cat_video.mp4
+
+# Generate a landscape video
+ff video -p "a sunset over the ocean" -s 1080p -o sunset.mp4
+
+# Generate a portrait video
+ff video -p "a person walking down a street" -s v1080p -o walking.mp4
+
+# With debug output
+ff video -p "a rocket launching" -s 720p -o rocket.mp4 --debug
+```
+
+**Note:** Video generation is an asynchronous process. The CLI will:
+1. Submit the video generation request
+2. Poll the job status every 2 seconds
+3. Display progress updates
+4. Download the completed video when ready
 
 ### Background Replacement
 Replace image backgrounds with AI-generated content.

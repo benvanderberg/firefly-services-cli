@@ -2,6 +2,7 @@
 # Get these from the Adobe Developer Console (https://developer.adobe.com/console)
 FIREFLY_SERVICES_CLIENT_ID=your_client_id_here
 FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret_here
+FIREFLY_SERVICES_SCOPE=openid,AdobeID,session,additional_info,read_organizations,firefly_api,ff_apis
 
 # Azure Storage configuration
 # Get these from your Azure Storage Account in the Azure Portal
@@ -10,8 +11,16 @@ AZURE_STORAGE_CONTAINER=your_container_name      # The name of the blob containe
 AZURE_SAS_TOKEN=your_sas_token_here             # The SAS token for authentication (without the ? prefix)
 
 # Rate limiting configuration
-# Maximum number of image generation API calls per 60 seconds
+# Maximum number of image generation API calls per period
 THROTTLE_LIMIT_FIREFLY=5
+# Time period for rate limiting in seconds
+THROTTLE_PERIOD_SECONDS=60
+# Minimum delay between processing CSV rows in seconds
+THROTTLE_MIN_DELAY_SECONDS=1.0
+# Delay between processing CSV rows in seconds
+THROTTLE_PAUSE_SECONDS=0.5
+# Whether to throttle status polling requests (true/false)
+THROTTLE_STATUS_REQUESTS=true
 
 # Storage type (currently only 'azure' is supported)
 STORAGE_TYPE=azure 

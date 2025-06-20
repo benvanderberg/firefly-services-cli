@@ -23,6 +23,7 @@ from services.image import generate_image, parse_model_variations, parse_style_r
 from services.speech import generate_speech, get_available_voices, parse_voice_variations, get_voice_id_by_name
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
+from services.video import generate_video, check_video_job_status, download_video
 from config.settings import (
     IMAGE_GENERATION_API_URL,
     SPEECH_API_URL,
@@ -37,6 +38,93 @@ from config.settings import (
 
 # Load environment variables
 load_dotenv()
+
+def log_image_generation(prompt, model, output_filename, elapsed_time, success, error_msg=None, **kwargs):
+    """
+    Log image generation details to logs/image.txt
+    
+    Args:
+        prompt (str): The prompt used
+        model (str): The model used
+        output_filename (str): The output filename
+        elapsed_time (float): Time taken in seconds
+        success (bool): Whether generation was successful
+        error_msg (str): Error message if failed
+        **kwargs: Additional parameters to log
+    """
+    try:
+        print(f"DEBUG: Attempting to log image generation - {output_filename} ({elapsed_time:.1f}s)")
+        
+        # Create logs directory if it doesn't exist
+        os.makedirs('logs', exist_ok=True)
+        
+        # Check if file exists to determine if we need to write header
+        file_exists = os.path.exists('logs/image.txt')
+        
+        # Prepare log entry
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        log_entry = [
+            timestamp,  # Date/Time
+            f"{elapsed_time:.1f}",  # Seconds
+            prompt,  # Prompt
+            model,  # Model
+            output_filename,  # Output filename
+            "SUCCESS" if success else "FAILED",  # Status
+            error_msg or "",  # Error message
+            kwargs.get('content_class', ''),  # Content class
+            kwargs.get('negative_prompt', ''),  # Negative prompt
+            kwargs.get('locale', ''),  # Locale
+            str(kwargs.get('size', '')),  # Size
+            str(kwargs.get('seeds', '')),  # Seeds
+            kwargs.get('visual_intensity', ''),  # Visual intensity
+            kwargs.get('style_ref', ''),  # Style reference
+            kwargs.get('style_ref_strength', ''),  # Style reference strength
+            kwargs.get('composition_ref', ''),  # Composition reference
+            kwargs.get('composition_ref_strength', ''),  # Composition reference strength
+            kwargs.get('num_variations', ''),  # Number of variations
+            kwargs.get('debug', ''),  # Debug mode
+            kwargs.get('silent', ''),  # Silent mode
+            kwargs.get('overwrite', ''),  # Overwrite mode
+        ]
+        
+        # Write to log file
+        with open('logs/image.txt', 'a', encoding='utf-8') as f:
+            # Write header if file is new
+            if not file_exists:
+                header = [
+                    'Date/Time',
+                    'Seconds',
+                    'Prompt',
+                    'Model',
+                    'Output_Filename',
+                    'Status',
+                    'Error_Message',
+                    'Content_Class',
+                    'Negative_Prompt',
+                    'Locale',
+                    'Size',
+                    'Seeds',
+                    'Visual_Intensity',
+                    'Style_Reference',
+                    'Style_Reference_Strength',
+                    'Composition_Reference',
+                    'Composition_Reference_Strength',
+                    'Num_Variations',
+                    'Debug',
+                    'Silent',
+                    'Overwrite'
+                ]
+                f.write('\t'.join(header) + '\n')
+            
+            # Write data row
+            f.write('\t'.join(str(item) for item in log_entry) + '\n')
+            print(f"DEBUG: Successfully logged to logs/image.txt")
+            
+    except Exception as e:
+        # Don't let logging errors break the main functionality
+        print(f"Warning: Could not write to log file: {e}")
+        import traceback
+        traceback.print_exc()
 
 def handle_command(args):
     """
@@ -71,6 +159,8 @@ def handle_command(args):
         handle_replace_bg_command(args, access_token)
     elif args.command in ['models', 'cm-list', 'ml']:
         handle_list_custom_models_command(args, access_token)
+    elif args.command == 'video':
+        handle_video_command(args, access_token)
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
@@ -86,6 +176,7 @@ def handle_image_command(args, access_token):
     STANDARD_MODELS = {'image3', 'image4', 'image4_standard', 'image4_ultra', 'ultra'}
     # Helper for single job
     def run_image_job(prompt, model, output, style_ref, composition_ref, j, size, custom_model_asset_ids, rate_limiter=None):
+        start_time = time.time()
         tokens = {
             'prompt': prompt,
             'model': model,
@@ -127,10 +218,84 @@ def handle_image_command(args, access_token):
                     if args.debug:
                         print(f"Downloading image to {output_filename}...")
                     download_file(image_url, output_filename, args.silent, args.debug)
+                    elapsed_time = time.time() - start_time
+                    print(f"✓ Generated: {os.path.basename(output_filename)} ({elapsed_time:.1f}s)")
+                    # Log successful generation
+                    log_image_generation(
+                        prompt=prompt,
+                        model=model,
+                        output_filename=os.path.basename(output_filename),
+                        elapsed_time=elapsed_time,
+                        success=True,
+                        content_class=args.content_class,
+                        negative_prompt=args.negative_prompt,
+                        locale=args.locale,
+                        size=size,
+                        seeds=args.seeds,
+                        visual_intensity=args.visual_intensity,
+                        style_ref=style_ref,
+                        style_ref_strength=args.style_reference_strength,
+                        composition_ref=composition_ref,
+                        composition_ref_strength=args.composition_reference_strength,
+                        num_variations=1,
+                        debug=args.debug,
+                        silent=args.silent,
+                        overwrite=args.overwrite
+                    )
                     return True
+            elapsed_time = time.time() - start_time
+            print(f"✗ Failed: {os.path.basename(output_filename)} ({elapsed_time:.1f}s)")
+            # Log failed generation
+            log_image_generation(
+                prompt=prompt,
+                model=model,
+                output_filename=os.path.basename(output_filename),
+                elapsed_time=elapsed_time,
+                success=False,
+                error_msg="No outputs in response",
+                content_class=args.content_class,
+                negative_prompt=args.negative_prompt,
+                locale=args.locale,
+                size=size,
+                seeds=args.seeds,
+                visual_intensity=args.visual_intensity,
+                style_ref=style_ref,
+                style_ref_strength=args.style_reference_strength,
+                composition_ref=composition_ref,
+                composition_ref_strength=args.composition_reference_strength,
+                num_variations=1,
+                debug=args.debug,
+                silent=args.silent,
+                overwrite=args.overwrite
+            )
             return False
         except Exception as e:
-            print(f"Error generating image: {str(e)}")
+            elapsed_time = time.time() - start_time
+            error_msg = str(e)
+            print(f"Error generating image: {error_msg} ({elapsed_time:.1f}s)")
+            # Log failed generation with error
+            log_image_generation(
+                prompt=prompt,
+                model=model,
+                output_filename=os.path.basename(output_filename),
+                elapsed_time=elapsed_time,
+                success=False,
+                error_msg=error_msg,
+                content_class=args.content_class,
+                negative_prompt=args.negative_prompt,
+                locale=args.locale,
+                size=size,
+                seeds=args.seeds,
+                visual_intensity=args.visual_intensity,
+                style_ref=style_ref,
+                style_ref_strength=args.style_reference_strength,
+                composition_ref=composition_ref,
+                composition_ref_strength=args.composition_reference_strength,
+                num_variations=1,
+                debug=args.debug,
+                silent=args.silent,
+                overwrite=args.overwrite
+            )
             if args.debug:
                 import traceback
                 traceback.print_exc()
@@ -145,7 +310,9 @@ def handle_image_command(args, access_token):
         subject_val = getattr(args, 'subject', None)
         cli_model = getattr(args, 'model', None)
         throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
-        rate_limiter = RateLimiter(throttle_limit, 60)
+        throttle_period = int(os.getenv('THROTTLE_PERIOD_SECONDS', 60))
+        throttle_min_delay = float(os.getenv('THROTTLE_MIN_DELAY_SECONDS', 0.0))
+        rate_limiter = RateLimiter(throttle_limit, throttle_period, throttle_min_delay)
         with open(csv_path, newline='', encoding='utf-8-sig') as csvfile:
             reader = csvmod.DictReader(csvfile)
             rows = list(reader)
@@ -425,7 +592,9 @@ def handle_image_command(args, access_token):
     total_generations = total_variations * total_models * total_style_refs * total_composition_refs * args.numVariations
     # Get throttle limit from environment
     throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
-    rate_limiter = RateLimiter(throttle_limit, 60)
+    throttle_period = int(os.getenv('THROTTLE_PERIOD_SECONDS', 60))
+    throttle_min_delay = float(os.getenv('THROTTLE_MIN_DELAY_SECONDS', 0.0))
+    rate_limiter = RateLimiter(throttle_limit, throttle_period, throttle_min_delay)
     if not args.silent:
         print(f'Generating {total_generations} total variations:')
         print(f'  • {total_variations} prompt variations')
@@ -435,6 +604,7 @@ def handle_image_command(args, access_token):
         print(f'  • {args.numVariations} variations per combination')
         print(f'Using parallel processing with rate limit of {throttle_limit} calls per minute\n')
     def image_task(prompt, model_version, style_ref, composition_ref, j):
+        start_time = time.time()
         rate_limiter.acquire()
         tokens = {
             'prompt': prompt,
@@ -479,17 +649,63 @@ def handle_image_command(args, access_token):
                     if args.debug:
                         print(f"Downloading image to {output_filename}...")
                     download_file(image_url, output_filename, args.silent, args.debug)
+                    elapsed_time = time.time() - start_time
+                    print(f"✓ Generated: {os.path.basename(output_filename)} ({elapsed_time:.1f}s)")
+                    # Log successful generation
+                    log_image_generation(
+                        prompt=prompt,
+                        model=model_version,
+                        output_filename=os.path.basename(output_filename),
+                        elapsed_time=elapsed_time,
+                        success=True,
+                        content_class=args.content_class,
+                        negative_prompt=args.negative_prompt,
+                        locale=args.locale,
+                        size=size,
+                        seeds=args.seeds,
+                        visual_intensity=args.visual_intensity,
+                        style_ref=style_ref,
+                        style_ref_strength=args.style_reference_strength,
+                        composition_ref=composition_ref,
+                        composition_ref_strength=args.composition_reference_strength,
+                        num_variations=1,
+                        debug=args.debug,
+                        silent=args.silent,
+                        overwrite=args.overwrite
+                    )
                     return True
+            elapsed_time = time.time() - start_time
+            print(f"✗ Failed: {os.path.basename(output_filename)} ({elapsed_time:.1f}s)")
+            # Log failed generation
+            log_image_generation(
+                prompt=prompt,
+                model=model_version,
+                output_filename=os.path.basename(output_filename),
+                elapsed_time=elapsed_time,
+                success=False,
+                error_msg="No outputs in response",
+                content_class=args.content_class,
+                negative_prompt=args.negative_prompt,
+                locale=args.locale,
+                size=size,
+                seeds=args.seeds,
+                visual_intensity=args.visual_intensity,
+                style_ref=style_ref,
+                style_ref_strength=args.style_reference_strength,
+                composition_ref=composition_ref,
+                composition_ref_strength=args.composition_reference_strength,
+                num_variations=1,
+                debug=args.debug,
+                silent=args.silent,
+                overwrite=args.overwrite
+            )
             return False
         except Exception as e:
-            print(f"Error generating image: {str(e)}")
+            elapsed_time = time.time() - start_time
+            print(f"Error generating image: {str(e)} ({elapsed_time:.1f}s)")
             if args.debug:
                 import traceback
                 traceback.print_exc()
-            # Check if it's a 529 error (overloaded service)
-            if "529" in str(e) or "Too Many Requests" in str(e):
-                if args.debug:
-                    print("Detected 529 error - this task will be retried after all others complete")
             return False
     # Create a list to store all generation tasks
     generation_tasks = []
@@ -540,7 +756,9 @@ def handle_similar_image_command(args, access_token):
 
     # Get throttle limit from environment
     throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
-    rate_limiter = RateLimiter(throttle_limit, 60)
+    throttle_period = int(os.getenv('THROTTLE_PERIOD_SECONDS', 60))
+    throttle_min_delay = float(os.getenv('THROTTLE_MIN_DELAY_SECONDS', 0.0))
+    rate_limiter = RateLimiter(throttle_limit, throttle_period, throttle_min_delay)
 
     if not args.silent:
         print(f'Generating {total_generations} total variations:')
@@ -658,7 +876,9 @@ def handle_tts_command(args, access_token):
 
     # Create rate limiter for API calls using environment variable
     throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
-    rate_limiter = RateLimiter(max_calls=throttle_limit, period=60)
+    throttle_period = int(os.getenv('THROTTLE_PERIOD_SECONDS', 60))
+    throttle_min_delay = float(os.getenv('THROTTLE_MIN_DELAY_SECONDS', 0.0))
+    rate_limiter = RateLimiter(throttle_limit, throttle_period, throttle_min_delay)
 
     # Prepare voice combinations
     voice_combinations = []
@@ -1209,7 +1429,9 @@ def handle_fill_command(args, access_token):
 
     # Get throttle limit from environment
     throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
-    rate_limiter = RateLimiter(throttle_limit, 60)
+    throttle_period = int(os.getenv('THROTTLE_PERIOD_SECONDS', 60))
+    throttle_min_delay = float(os.getenv('THROTTLE_MIN_DELAY_SECONDS', 0.0))
+    rate_limiter = RateLimiter(throttle_limit, throttle_period, throttle_min_delay)
 
     if not args.silent:
         print(f'Generating {total_variations} total variations:')
@@ -1372,7 +1594,9 @@ def handle_replace_bg_command(args, access_token):
 
     # Get throttle limit from environment - reduce it for mask operations
     throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 2))  # Reduced from 5 to 2
-    rate_limiter = RateLimiter(throttle_limit, 60)
+    throttle_period = int(os.getenv('THROTTLE_PERIOD_SECONDS', 60))
+    throttle_min_delay = float(os.getenv('THROTTLE_MIN_DELAY_SECONDS', 0.0))
+    rate_limiter = RateLimiter(throttle_limit, throttle_period, throttle_min_delay)
 
     if not args.silent:
         print(f'Generating {total_variations} total variations:')
@@ -1527,9 +1751,12 @@ def check_job_status(status_url, access_token, silent=False, debug=False, rate_l
         'Authorization': f'Bearer {access_token}'
     }
 
+    # Check if status requests should be throttled
+    throttle_status = os.getenv('THROTTLE_STATUS_REQUESTS', 'true').lower() == 'true'
+
     while True:
-        # Apply rate limiting if provided
-        if rate_limiter:
+        # Apply rate limiting if provided and enabled for status requests
+        if rate_limiter and throttle_status:
             rate_limiter.acquire()
             
         response = requests.get(status_url, headers=headers)
@@ -1830,3 +2057,141 @@ def handle_list_custom_models_command(args, access_token):
         if args.debug:
             import traceback
             traceback.print_exc()
+
+def handle_video_command(args, access_token):
+    """Handle the video generation command."""
+    import time
+    import os
+    
+    # Validate output file extension
+    if not args.output.lower().endswith('.mp4'):
+        print("Error: Output file must have .mp4 extension")
+        sys.exit(1)
+    
+    # Ensure output directory exists
+    output_dir = os.path.dirname(args.output)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    # Check if file exists and handle overwrite
+    if os.path.exists(args.output) and not args.overwrite:
+        print(f"Error: Output file '{args.output}' already exists. Use --overwrite to overwrite.")
+        sys.exit(1)
+    
+    if not args.silent:
+        print(f"Generating video with prompt: '{args.prompt}'")
+        print(f"Size: {args.size}")
+        print(f"Output: {args.output}")
+    
+    start_time = time.time()
+    
+    try:
+        # Generate video
+        if not args.silent:
+            print("Submitting video generation request...")
+        
+        response = generate_video(
+            access_token=access_token,
+            prompt=args.prompt,
+            size=args.size,
+            debug=args.debug
+        )
+        
+        if args.debug:
+            print(f"DEBUG: Generation response: {response}")
+        
+        job_id = response.get('jobId')
+        status_url = response.get('statusUrl')
+        
+        if not job_id or not status_url:
+            print("Error: Invalid response from video generation API")
+            sys.exit(1)
+        
+        if not args.silent:
+            print(f"Job submitted successfully. Job ID: {job_id}")
+            print("Polling for completion...")
+        
+        # Poll for completion
+        max_retries = int(os.getenv('API_MAX_RETRIES', 3))
+        retry_delay = float(os.getenv('API_RETRY_DELAY', 2.0))
+        poll_interval = 2  # seconds
+        
+        for attempt in range(max_retries):
+            try:
+                while True:
+                    status_response = check_video_job_status(
+                        status_url=status_url,
+                        access_token=access_token,
+                        debug=args.debug
+                    )
+                    
+                    if args.debug:
+                        print(f"DEBUG: Status response: {status_response}")
+                    
+                    status = status_response.get('status')
+                    
+                    if status == 'succeeded':
+                        if not args.silent:
+                            print("Video generation completed successfully!")
+                        
+                        # Extract video URL
+                        result = status_response.get('result', {})
+                        outputs = result.get('outputs', [])
+                        
+                        if not outputs:
+                            print("Error: No video outputs in response")
+                            sys.exit(1)
+                        
+                        video_url = outputs[0].get('video', {}).get('url')
+                        if not video_url:
+                            print("Error: No video URL in response")
+                            sys.exit(1)
+                        
+                        # Download video
+                        if not args.silent:
+                            print(f"Downloading video to: {args.output}")
+                        
+                        download_video(
+                            url=video_url,
+                            output_file=args.output,
+                            debug=args.debug
+                        )
+                        
+                        elapsed_time = time.time() - start_time
+                        if not args.silent:
+                            print(f"Video saved successfully! (took {elapsed_time:.1f} seconds)")
+                        
+                        return
+                    
+                    elif status == 'failed':
+                        error_msg = status_response.get('error', 'Unknown error')
+                        print(f"Video generation failed: {error_msg}")
+                        sys.exit(1)
+                    
+                    elif status == 'running':
+                        progress = status_response.get('progress', 0)
+                        if not args.silent:
+                            print(f"Progress: {progress}%")
+                        time.sleep(poll_interval)
+                    
+                    else:
+                        print(f"Unknown status: {status}")
+                        time.sleep(poll_interval)
+                
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"Request failed (attempt {attempt + 1}/{max_retries}): {e}")
+                    print(f"Retrying in {wait_time} seconds...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"Failed after {max_retries} attempts: {e}")
+                    sys.exit(1)
+    
+    except Exception as e:
+        elapsed_time = time.time() - start_time
+        print(f"Error generating video: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)

@@ -1,0 +1,5 @@
+Date/Time	Seconds	Prompt	Model	Output_Filename	Status	Error_Message	Content_Class	Negative_Prompt	Locale	Size	Seeds	Visual_Intensity	Style_Reference	Style_Reference_Strength	Composition_Reference	Composition_Reference_Strength	Num_Variations	Debug	Silent	Overwrite
+2025-06-18 18:35:22	5.7	a puppy eating a sandwich	image4_standard	test_image4_standard__1.jpg	SUCCESS		photo	None	None	None	None	None	None	50	None	50	1	False	False	False
+2025-06-18 18:35:41	9.8	a puppy eating a sandwich	image4_ultra	test_image4_ultra_.jpg	SUCCESS		photo	None	None	None	None	None	None	50	None	50	1	False	False	False
+2025-06-18 18:46:41	60.5	Shantanu eating a sandwich	urn:aaid:sc:VA6C2:0091660b-2d76-4394-b884-811474f69634	test_urn:aaid:sc:VA6C2:0091660b-2d76-4394-b884-811474f69634_.jpg	SUCCESS		photo	None	None	None	None	None	None	50	None	50	1	False	False	False
+2025-06-19 17:44:19	9.9	Shantanu eating a sandwich	image4_ultra	test_image4_ultra__1.jpg	SUCCESS		photo	None	None	None	None	None	None	50	None	50	1	False	False	False
