@@ -88,13 +88,17 @@ def _generate_image_internal(access_token, prompt, num_generations=1, model_vers
     if visual_intensity is not None:
         data["visualIntensity"] = visual_intensity
     if style_ref_url:
-        data["styleReference"] = {
-            "source": {"url": style_ref_url},
+        data["style"] = {
+            "imageReference": {
+                "source": {"url": style_ref_url}
+            },
             "strength": style_ref_strength
         }
     if composition_ref_url:
-        data["compositionReference"] = {
-            "source": {"url": composition_ref_url},
+        data["structure"] = {
+            "imageReference": {
+                "source": {"url": composition_ref_url}
+            },
             "strength": composition_ref_strength
         }
     if custom_model:

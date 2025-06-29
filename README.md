@@ -309,6 +309,8 @@ Options:
   - `1080x1920` or `v1080p`: Portrait 1080x1920
   - `1080x1080` or `sq1080p`: Square 1080x1080
 - `-o, --output`: Output file path (must have .mp4 extension)
+- `--firstFrame`: Path to first frame reference image (optional)
+- `--lastFrame`: Path to last frame reference image (optional, requires --firstFrame)
 - `--overwrite`: Overwrite existing files
 - `--debug`: Enable debug output
 - `--silent`: Suppress output messages
@@ -324,6 +326,12 @@ ff video -p "a sunset over the ocean" -s 1080p -o sunset.mp4
 # Generate a portrait video
 ff video -p "a person walking down a street" -s v1080p -o walking.mp4
 
+# With first frame reference image
+ff video -p "a monkey in space" -s 720p -o video.mp4 --firstFrame imageFirst.jpg
+
+# With both first and last frame reference images
+ff video -p "a monkey in space" -s 720p -o video.mp4 --firstFrame imageFirst.jpg --lastFrame imageLast.jpg
+
 # With debug output
 ff video -p "a rocket launching" -s 720p -o rocket.mp4 --debug
 ```
@@ -333,6 +341,8 @@ ff video -p "a rocket launching" -s 720p -o rocket.mp4 --debug
 2. Poll the job status every 2 seconds
 3. Display progress updates
 4. Download the completed video when ready
+
+**Reference Images:** When using `--firstFrame` and/or `--lastFrame`, the images will be uploaded to Azure Storage and used as reference frames for the video generation. If only `--firstFrame` is provided, the image will be used as a URL reference. If both frames are provided, they will be used as uploadId references.
 
 ### Background Replacement
 Replace image backgrounds with AI-generated content.

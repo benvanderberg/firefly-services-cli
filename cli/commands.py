@@ -2094,6 +2094,8 @@ def handle_video_command(args, access_token):
             access_token=access_token,
             prompt=args.prompt,
             size=args.size,
+            first_frame=args.firstFrame,
+            last_frame=args.lastFrame,
             debug=args.debug
         )
         

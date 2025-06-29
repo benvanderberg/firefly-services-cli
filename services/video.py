@@ -2,6 +2,7 @@ import requests
 import time
 import os
 from typing import Dict, Any, Optional
+from utils.storage import upload_to_azure_storage
 
 # Video generation API URL
 VIDEO_GENERATION_API_URL = "https://firefly-beta.adobe.io/v3/videos/generate"
@@ -44,10 +45,39 @@ def parse_video_size(size_str: str) -> Dict[str, int]:
     
     return VIDEO_SIZES[size_str]
 
+def upload_reference_image(image_path: str, debug: bool = False) -> str:
+    """
+    Upload a reference image to Azure Storage and return the URL.
+    
+    Args:
+        image_path (str): Path to the image file
+        debug (bool): Enable debug output
+        
+    Returns:
+        str: URL of the uploaded image
+        
+    Raises:
+        Exception: If upload fails
+    """
+    if debug:
+        print(f"DEBUG: Uploading reference image: {image_path}")
+    
+    try:
+        url = upload_to_azure_storage(image_path, debug=debug)
+        
+        if debug:
+            print(f"DEBUG: Upload result URL: {url}")
+        
+        return url
+    except Exception as e:
+        raise Exception(f"Failed to upload reference image {image_path}: {str(e)}")
+
 def generate_video(
     access_token: str,
     prompt: str,
     size: str,
+    first_frame: Optional[str] = None,
+    last_frame: Optional[str] = None,
     debug: bool = False
 ) -> Dict[str, Any]:
     """
@@ -57,6 +87,8 @@ def generate_video(
         access_token (str): OAuth access token
         prompt (str): Text prompt for video generation
         size (str): Video size (e.g., "1080x1080", "1080p")
+        first_frame (str, optional): Path to first frame reference image
+        last_frame (str, optional): Path to last frame reference image
         debug (bool): Enable debug output
         
     Returns:
@@ -64,7 +96,12 @@ def generate_video(
         
     Raises:
         requests.RequestException: If API request fails
+        ValueError: If last_frame is provided without first_frame
     """
+    # Validate reference image parameters
+    if last_frame and not first_frame:
+        raise ValueError("lastFrame requires firstFrame to be specified")
+    
     # Parse size
     size_dict = parse_video_size(size)
     
@@ -82,6 +119,46 @@ def generate_video(
         'prompt': prompt,
         'sizes': [size_dict]
     }
+    
+    # Handle reference images
+    if first_frame or last_frame:
+        payload['image'] = {'conditions': []}
+        
+        # Upload and add first frame
+        if first_frame:
+            if debug:
+                print(f"DEBUG: Processing first frame: {first_frame}")
+            
+            first_frame_url = upload_reference_image(first_frame, debug)
+            
+            first_condition = {
+                'source': {
+                    'url': first_frame_url
+                },
+                'placement': {
+                    'position': 0
+                }
+            }
+            
+            payload['image']['conditions'].append(first_condition)
+        
+        # Upload and add last frame
+        if last_frame:
+            if debug:
+                print(f"DEBUG: Processing last frame: {last_frame}")
+            
+            last_frame_url = upload_reference_image(last_frame, debug)
+            
+            last_condition = {
+                'source': {
+                    'url': last_frame_url
+                },
+                'placement': {
+                    'position': 0
+                }
+            }
+            
+            payload['image']['conditions'].append(last_condition)
     
     if debug:
         print(f"DEBUG: Video generation request:")
