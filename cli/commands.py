@@ -3,7 +3,6 @@ import sys
 import json
 import time
 import asyncio
-import aiohttp
 import requests
 import concurrent.futures
 from datetime import datetime, timedelta, UTC
