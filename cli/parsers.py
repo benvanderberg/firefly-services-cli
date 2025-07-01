@@ -225,7 +225,7 @@ def create_parser():
     pdf_parser.add_argument('--ocr', action='store_true', help='Perform OCR on PDF file (instead of converting to PDF)')
     pdf_parser.add_argument('--linearize', action='store_true', help='Linearize PDF file for web optimization (instead of converting to PDF)')
     pdf_parser.add_argument('--autotag', action='store_true', help='Auto-tag PDF for accessibility (instead of converting to PDF)')
-    pdf_parser.add_argument('--watermark', action='store_true', help='Add watermark to PDF (instead of converting to PDF)')
+    pdf_parser.add_argument('--watermark', '--wm', action='store_true', help='Add watermark to PDF (instead of converting to PDF)')
     pdf_parser.add_argument('--shiftHeadings', action='store_true', help='Shift headings when auto-tagging PDF')
     pdf_parser.add_argument('--generateReport', action='store_true', help='Generate Excel report when auto-tagging PDF')
     pdf_parser.add_argument('-w', '--watermark-file', help='Path to the watermark PDF file')
