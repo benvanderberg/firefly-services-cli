@@ -23,7 +23,7 @@ from services.speech import generate_speech, get_available_voices, get_available
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
 from services.video import generate_video, check_video_job_status, download_video
-from services.pdf import upload_file_to_pdf_services, convert_to_pdf, check_pdf_job_status, export_pdf, get_target_format_from_extension, validate_ocr_language, compress_pdf, validate_compression_level, ocr_pdf, validate_ocr_language_for_ocr, validate_ocr_type, linearize_pdf, autotag_pdf, download_autotag_results, add_watermark, download_file
+from services.pdf import upload_file_to_pdf_services, convert_to_pdf, check_pdf_job_status, export_pdf, get_target_format_from_extension, validate_ocr_language, compress_pdf, validate_compression_level, ocr_pdf, validate_ocr_language_for_ocr, validate_ocr_type, linearize_pdf, autotag_pdf, download_autotag_results, add_watermark, protect_pdf, download_file
 from config.settings import (
     IMAGE_GENERATION_API_URL,
     SPEECH_API_URL,
@@ -2677,6 +2677,65 @@ def handle_pdf_command(args, access_token):
             
             if not args.silent:
                 print(f"✓ Watermarked PDF saved: {args.output}")
+                
+        except Exception as e:
+            print(f"Error: {e}")
+            return 1
+    elif args.protect:
+        # Protect PDF with password and encryption
+        if not args.owner_password and not args.user_password:
+            print("Error: At least one password (-opw/--owner-password OR -upw/--user-password) is required for protect operation")
+            return 1
+        
+        print(f"Protecting {args.input} with password...")
+        if args.owner_password:
+            print(f"Owner password: {'*' * len(args.owner_password)}")
+        if args.user_password:
+            print(f"User password: {'*' * len(args.user_password)}")
+        print(f"Encryption algorithm: {args.encryption_algorithm}")
+        print(f"Content to encrypt: {args.content_to_encrypt}")
+        if args.permissions:
+            print(f"Permissions: {', '.join(args.permissions)}")
+        
+        try:
+            # Step 1: Upload input PDF
+            print("Step 1: Uploading input PDF to Adobe PDF Services...")
+            input_asset_id = upload_file_to_pdf_services(access_token, args.input, args.debug)
+            
+            # Step 2: Protect PDF
+            print("Step 2: Protecting PDF...")
+            result = protect_pdf(
+                access_token, 
+                input_asset_id, 
+                args.owner_password,
+                args.user_password,
+                args.encryption_algorithm,
+                args.content_to_encrypt,
+                args.permissions,
+                args.debug
+            )
+            
+            # Step 3: Poll for completion and download
+            print("Step 3: Waiting for protection operation to complete...")
+            completed_result = check_pdf_job_status(result['statusUrl'], access_token, args.debug)
+            
+            # Step 4: Download the result
+            print("Step 4: Downloading protected PDF...")
+            if completed_result.get('status') == 'done' and 'asset' in completed_result:
+                asset = completed_result['asset']
+                download_uri = asset.get('downloadUri')
+                if download_uri:
+                    download_file(download_uri, args.output, args.silent, args.debug)
+                else:
+                    print("Error: No download URI found in asset")
+                    return 1
+            else:
+                print("Error: Job did not complete successfully")
+                print(f"Status: {completed_result.get('status')}")
+                return 1
+            
+            if not args.silent:
+                print(f"✓ Protected PDF saved: {args.output}")
                 
         except Exception as e:
             print(f"Error: {e}")

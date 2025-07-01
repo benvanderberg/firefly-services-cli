@@ -845,4 +845,103 @@ def download_autotag_results(result: Dict[str, Any], output_path: str, access_to
             print(f"Downloading report from: {report_uri}")
         download_file(report_uri, report_path, silent, debug)
         if not silent:
-            print(f"✓ Report saved: {report_path}") 
+            print(f"✓ Report saved: {report_path}")
+
+def protect_pdf(access_token: str, asset_id: str, owner_password: Optional[str] = None, 
+                user_password: Optional[str] = None, encryption_algorithm: str = "AES_256", 
+                content_to_encrypt: str = "ALL_CONTENT", permissions: Optional[list] = None, 
+                debug: bool = False) -> Dict[str, Any]:
+    """
+    Protect a PDF with password and encryption using Adobe PDF Services.
+    
+    Args:
+        access_token (str): The authentication token
+        asset_id (str): The asset ID of the input PDF
+        owner_password (str): The owner password for PDF protection (optional)
+        user_password (str): The user password for PDF protection (optional)
+        encryption_algorithm (str): Encryption algorithm (AES_256 or AES_128)
+        content_to_encrypt (str): Content to encrypt (ALL_CONTENT, ALL_CONTENT_EXCEPT_METADATA, ONLY_EMBEDDED_FILES)
+        permissions (list): List of permissions to allow
+        debug (bool): Whether to show debug information
+    
+    Returns:
+        dict: Response containing job ID and status URL
+    
+    Raises:
+        Exception: If protection request fails
+    """
+    api_key = os.environ.get('FIREFLY_SERVICES_CLIENT_ID')
+    if not api_key:
+        raise ValueError("FIREFLY_SERVICES_CLIENT_ID is not set in environment")
+    
+    # Validate that at least one password is provided
+    if not owner_password and not user_password:
+        raise ValueError("At least one password (owner or user) must be provided")
+    
+    headers = {
+        'x-api-key': api_key,
+        'x-request-id': f'ffcli-{int(time.time())}',
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        "assetID": asset_id,
+        "passwordProtection": {},
+        "encryptionAlgorithm": encryption_algorithm,
+        "contentToEncrypt": content_to_encrypt
+    }
+    
+    # Add passwords to passwordProtection
+    if owner_password:
+        payload["passwordProtection"]["ownerPassword"] = owner_password
+    if user_password:
+        payload["passwordProtection"]["userPassword"] = user_password
+    
+    # Add permissions if specified
+    if permissions:
+        payload["permissions"] = permissions
+    
+    if debug:
+        print(f"Making request to: https://pdf-services-ue1.adobe.io/operation/protectpdf")
+        print(f"Headers: {headers}")
+        print(f"Payload: {payload}")
+    
+    response = requests.post(
+        'https://pdf-services-ue1.adobe.io/operation/protectpdf',
+        headers=headers,
+        json=payload
+    )
+    response.raise_for_status()
+    
+    if debug:
+        print(f"Response status: {response.status_code}")
+        print(f"Response headers: {dict(response.headers)}")
+        print(f"Response text: {response.text}")
+    
+    # For 201 responses, we expect the status URL in the location header, not JSON body
+    if response.status_code == 201:
+        # Extract status URL from location header
+        status_url = response.headers.get('location')
+        if not status_url:
+            raise Exception("No location header in response from Adobe PDF Services API")
+        
+        if debug:
+            print(f"Status URL from location header: {status_url}")
+        
+        # Extract job ID from the status URL
+        job_id = status_url.split('/')[-2] if '/' in status_url else 'unknown'
+        
+        return {
+            'jobId': job_id,
+            'statusUrl': status_url
+        }
+    else:
+        # For other status codes, try to parse JSON
+        try:
+            data = response.json()
+            if debug:
+                print(f"Parsed response: {data}")
+            return data
+        except json.JSONDecodeError as e:
+            raise Exception(f"Invalid JSON response from Adobe PDF Services API: {e}") 
