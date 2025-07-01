@@ -23,7 +23,7 @@ from services.speech import generate_speech, get_available_voices, get_available
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
 from services.video import generate_video, check_video_job_status, download_video
-from services.pdf import upload_file_to_pdf_services, convert_to_pdf, check_pdf_job_status
+from services.pdf import upload_file_to_pdf_services, convert_to_pdf, check_pdf_job_status, export_pdf, get_target_format_from_extension, validate_ocr_language, compress_pdf, validate_compression_level, ocr_pdf, validate_ocr_language_for_ocr, validate_ocr_type, linearize_pdf, autotag_pdf, download_autotag_results
 from config.settings import (
     IMAGE_GENERATION_API_URL,
     SPEECH_API_URL,
@@ -2597,7 +2597,7 @@ def handle_video_command(args, access_token):
         sys.exit(1)
 
 def handle_pdf_command(args, access_token):
-    """Handle the PDF conversion command."""
+    """Handle the PDF conversion/export command."""
     import os
     
     # Validate input file exists
@@ -2605,15 +2605,36 @@ def handle_pdf_command(args, access_token):
         print(f"Error: Input file '{args.input}' does not exist")
         sys.exit(1)
     
-    # Validate output file has .pdf extension
-    if not args.output.lower().endswith('.pdf'):
-        print(f"Error: Output file must have .pdf extension")
-        sys.exit(1)
-    
     # Create output directory if it doesn't exist
     output_dir = os.path.dirname(args.output)
     if output_dir and not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    
+    if args.export:
+        # Export PDF to another format
+        handle_pdf_export(args, access_token)
+    elif args.compress:
+        # Compress PDF file
+        handle_pdf_compress(args, access_token)
+    elif args.ocr:
+        # Perform OCR on PDF file
+        handle_pdf_ocr(args, access_token)
+    elif args.linearize:
+        # Linearize PDF file
+        handle_pdf_linearize(args, access_token)
+    elif args.autotag:
+        # Auto-tag PDF file
+        handle_pdf_autotag(args, access_token)
+    else:
+        # Convert file to PDF
+        handle_pdf_convert(args, access_token)
+
+def handle_pdf_convert(args, access_token):
+    """Handle PDF conversion (file to PDF)."""
+    # Validate output file has .pdf extension
+    if not args.output.lower().endswith('.pdf'):
+        print(f"Error: Output file must have .pdf extension")
+        sys.exit(1)
     
     if not args.silent:
         print(f"Converting {args.input} to PDF...")
@@ -2668,6 +2689,377 @@ def handle_pdf_command(args, access_token):
         sys.exit(1)
     except Exception as e:
         print(f"Error converting to PDF: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+def handle_pdf_export(args, access_token):
+    """Handle PDF export (PDF to other format)."""
+    # Validate input file has .pdf extension
+    if not args.input.lower().endswith('.pdf'):
+        print(f"Error: Input file must be a PDF file (.pdf extension)")
+        sys.exit(1)
+    
+    # Validate OCR language
+    if not validate_ocr_language(args.ocrLang):
+        print(f"Error: Unsupported OCR language: {args.ocrLang}")
+        sys.exit(1)
+    
+    # Get target format from output file extension
+    try:
+        target_format = get_target_format_from_extension(args.output)
+    except ValueError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
+    
+    if not args.silent:
+        print(f"Exporting {args.input} to {target_format.upper()}...")
+        print(f"OCR Language: {args.ocrLang}")
+    
+    try:
+        # Step 1: Upload the PDF file to get asset ID
+        if not args.silent:
+            print("Step 1: Uploading PDF to Adobe PDF Services...")
+        
+        asset_id = upload_file_to_pdf_services(access_token, args.input, args.debug)
+        
+        if not args.silent:
+            print(f"Asset ID: {asset_id}")
+            print(f"Step 2: Exporting to {target_format.upper()}...")
+        
+        # Step 2: Export PDF to target format
+        job_info = export_pdf(access_token, asset_id, target_format, args.ocrLang, args.debug)
+        
+        if not args.silent:
+            print(f"Job ID: {job_info['jobId']}")
+            print("Polling for job completion...")
+        
+        # Step 3: Poll for completion and download result
+        result = check_pdf_job_status(job_info['statusUrl'], access_token, args.debug)
+        
+        if args.debug:
+            print(f"Final result: {result}")
+        
+        # Check for the download URI in the response
+        if result.get('status') == 'done' and 'asset' in result:
+            asset = result['asset']
+            download_uri = asset.get('downloadUri')
+            if download_uri:
+                if args.debug:
+                    print(f"Downloading {target_format.upper()} file from: {download_uri}")
+                download_file(download_uri, args.output, args.silent, args.debug)
+                if not args.silent:
+                    print(f"✓ {target_format.upper()} file created successfully: {args.output}")
+                return
+            else:
+                print("Error: No download URI found in asset")
+                sys.exit(1)
+        else:
+            print("Error: Job did not complete successfully")
+            print(f"Status: {result.get('status')}")
+            sys.exit(1)
+        
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e}")
+        if args.debug:
+            print(f"Response: {e.response.text}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error exporting PDF: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+def handle_pdf_compress(args, access_token):
+    """Handle PDF compression."""
+    # Validate input file has .pdf extension
+    if not args.input.lower().endswith('.pdf'):
+        print(f"Error: Input file must be a PDF file (.pdf extension)")
+        sys.exit(1)
+    
+    # Validate output file has .pdf extension
+    if not args.output.lower().endswith('.pdf'):
+        print(f"Error: Output file must have .pdf extension")
+        sys.exit(1)
+    
+    # Validate compression level
+    if not validate_compression_level(args.compressionLevel):
+        print(f"Error: Invalid compression level: {args.compressionLevel}. Must be LOW, MEDIUM, or HIGH")
+        sys.exit(1)
+    
+    if not args.silent:
+        print(f"Compressing {args.input} with {args.compressionLevel.upper()} compression...")
+    
+    try:
+        # Step 1: Upload the PDF file to get asset ID
+        if not args.silent:
+            print("Step 1: Uploading PDF to Adobe PDF Services...")
+        
+        asset_id = upload_file_to_pdf_services(access_token, args.input, args.debug)
+        
+        if not args.silent:
+            print(f"Asset ID: {asset_id}")
+            print(f"Step 2: Compressing PDF...")
+        
+        # Step 2: Compress PDF
+        job_info = compress_pdf(access_token, asset_id, args.compressionLevel, args.debug)
+        
+        if not args.silent:
+            print(f"Job ID: {job_info['jobId']}")
+            print("Polling for job completion...")
+        
+        # Step 3: Poll for completion and download result
+        result = check_pdf_job_status(job_info['statusUrl'], access_token, args.debug)
+        
+        if args.debug:
+            print(f"Final result: {result}")
+        
+        # Check for the download URI in the response
+        if result.get('status') == 'done' and 'asset' in result:
+            asset = result['asset']
+            download_uri = asset.get('downloadUri')
+            if download_uri:
+                if args.debug:
+                    print(f"Downloading compressed PDF from: {download_uri}")
+                download_file(download_uri, args.output, args.silent, args.debug)
+                if not args.silent:
+                    print(f"✓ PDF compressed successfully: {args.output}")
+                return
+            else:
+                print("Error: No download URI found in asset")
+                sys.exit(1)
+        else:
+            print("Error: Job did not complete successfully")
+            print(f"Status: {result.get('status')}")
+            sys.exit(1)
+        
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e}")
+        if args.debug:
+            print(f"Response: {e.response.text}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error compressing PDF: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+def handle_pdf_ocr(args, access_token):
+    """Handle PDF OCR."""
+    # Validate input file has .pdf extension
+    if not args.input.lower().endswith('.pdf'):
+        print(f"Error: Input file must be a PDF file (.pdf extension)")
+        sys.exit(1)
+    
+    # Validate output file has .pdf extension
+    if not args.output.lower().endswith('.pdf'):
+        print(f"Error: Output file must have .pdf extension")
+        sys.exit(1)
+    
+    # Validate OCR language
+    if not validate_ocr_language_for_ocr(args.ocrLang):
+        print(f"Error: Unsupported OCR language: {args.ocrLang}")
+        sys.exit(1)
+    
+    # Validate OCR type
+    if not validate_ocr_type(args.ocrType):
+        print(f"Error: Invalid OCR type: {args.ocrType}. Must be 'searchable_image' or 'searchable_image_exact'")
+        sys.exit(1)
+    
+    if not args.silent:
+        print(f"Performing OCR on {args.input}...")
+        print(f"OCR Language: {args.ocrLang}")
+        print(f"OCR Type: {args.ocrType}")
+    
+    try:
+        # Step 1: Upload the PDF file to get asset ID
+        if not args.silent:
+            print("Step 1: Uploading PDF to Adobe PDF Services...")
+        
+        asset_id = upload_file_to_pdf_services(access_token, args.input, args.debug)
+        
+        if not args.silent:
+            print(f"Asset ID: {asset_id}")
+            print(f"Step 2: Performing OCR...")
+        
+        # Step 2: Perform OCR on PDF
+        job_info = ocr_pdf(access_token, asset_id, args.ocrLang, args.ocrType, args.debug)
+        
+        if not args.silent:
+            print(f"Job ID: {job_info['jobId']}")
+            print("Polling for job completion...")
+        
+        # Step 3: Poll for completion and download result
+        result = check_pdf_job_status(job_info['statusUrl'], access_token, args.debug)
+        
+        if args.debug:
+            print(f"Final result: {result}")
+        
+        # Check for the download URI in the response
+        if result.get('status') == 'done' and 'asset' in result:
+            asset = result['asset']
+            download_uri = asset.get('downloadUri')
+            if download_uri:
+                if args.debug:
+                    print(f"Downloading OCR'd PDF from: {download_uri}")
+                download_file(download_uri, args.output, args.silent, args.debug)
+                if not args.silent:
+                    print(f"✓ PDF OCR completed successfully: {args.output}")
+                return
+            else:
+                print("Error: No download URI found in asset")
+                sys.exit(1)
+        else:
+            print("Error: Job did not complete successfully")
+            print(f"Status: {result.get('status')}")
+            sys.exit(1)
+        
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e}")
+        if args.debug:
+            print(f"Response: {e.response.text}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error performing OCR: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+def handle_pdf_linearize(args, access_token):
+    """Handle PDF linearization."""
+    # Validate input file has .pdf extension
+    if not args.input.lower().endswith('.pdf'):
+        print(f"Error: Input file must be a PDF file (.pdf extension)")
+        sys.exit(1)
+    
+    # Validate output file has .pdf extension
+    if not args.output.lower().endswith('.pdf'):
+        print(f"Error: Output file must have .pdf extension")
+        sys.exit(1)
+    
+    if not args.silent:
+        print(f"Linearizing {args.input} for web optimization...")
+    
+    try:
+        # Step 1: Upload the PDF file to get asset ID
+        if not args.silent:
+            print("Step 1: Uploading PDF to Adobe PDF Services...")
+        
+        asset_id = upload_file_to_pdf_services(access_token, args.input, args.debug)
+        
+        if not args.silent:
+            print(f"Asset ID: {asset_id}")
+            print(f"Step 2: Linearizing PDF...")
+        
+        # Step 2: Linearize PDF
+        job_info = linearize_pdf(access_token, asset_id, args.debug)
+        
+        if not args.silent:
+            print(f"Job ID: {job_info['jobId']}")
+            print("Polling for job completion...")
+        
+        # Step 3: Poll for completion and download result
+        result = check_pdf_job_status(job_info['statusUrl'], access_token, args.debug)
+        
+        if args.debug:
+            print(f"Final result: {result}")
+        
+        # Check for the download URI in the response
+        if result.get('status') == 'done' and 'asset' in result:
+            asset = result['asset']
+            download_uri = asset.get('downloadUri')
+            if download_uri:
+                if args.debug:
+                    print(f"Downloading linearized PDF from: {download_uri}")
+                download_file(download_uri, args.output, args.silent, args.debug)
+                if not args.silent:
+                    print(f"✓ PDF linearized successfully: {args.output}")
+                return
+            else:
+                print("Error: No download URI found in asset")
+                sys.exit(1)
+        else:
+            print("Error: Job did not complete successfully")
+            print(f"Status: {result.get('status')}")
+            sys.exit(1)
+        
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e}")
+        if args.debug:
+            print(f"Response: {e.response.text}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error linearizing PDF: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+def handle_pdf_autotag(args, access_token):
+    """Handle PDF auto-tagging."""
+    # Validate input file has .pdf extension
+    if not args.input.lower().endswith('.pdf'):
+        print(f"Error: Input file must be a PDF file (.pdf extension)")
+        sys.exit(1)
+    
+    # Validate output file has .pdf extension
+    if not args.output.lower().endswith('.pdf'):
+        print(f"Error: Output file must have .pdf extension")
+        sys.exit(1)
+    
+    if not args.silent:
+        print(f"Auto-tagging {args.input} for accessibility...")
+        if args.shiftHeadings:
+            print("Shift headings: enabled")
+        if args.generateReport:
+            print("Generate report: enabled")
+    
+    try:
+        # Step 1: Upload the PDF file to get asset ID
+        if not args.silent:
+            print("Step 1: Uploading PDF to Adobe PDF Services...")
+        
+        asset_id = upload_file_to_pdf_services(access_token, args.input, args.debug)
+        
+        if not args.silent:
+            print(f"Asset ID: {asset_id}")
+            print(f"Step 2: Auto-tagging PDF...")
+        
+        # Step 2: Auto-tag PDF
+        job_info = autotag_pdf(access_token, asset_id, args.shiftHeadings, args.generateReport, args.debug)
+        
+        if not args.silent:
+            print(f"Job ID: {job_info['jobId']}")
+            print("Polling for job completion...")
+        
+        # Step 3: Poll for completion and download result
+        result = check_pdf_job_status(job_info['statusUrl'], access_token, args.debug)
+        
+        if args.debug:
+            print(f"Final result: {result}")
+        
+        # Step 4: Download results (tagged PDF and optionally report)
+        if result.get('status') == 'done':
+            download_autotag_results(result, args.output, access_token, args.silent, args.debug)
+            if not args.silent:
+                print(f"✓ PDF auto-tagging completed successfully")
+            return
+        else:
+            print("Error: Job did not complete successfully")
+            print(f"Status: {result.get('status')}")
+            sys.exit(1)
+        
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e}")
+        if args.debug:
+            print(f"Response: {e.response.text}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error auto-tagging PDF: {e}")
         if args.debug:
             import traceback
             traceback.print_exc()

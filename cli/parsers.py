@@ -219,9 +219,29 @@ def create_parser():
     pdf_upload_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
 
     # PDF conversion command
-    pdf_parser = subparsers.add_parser('pdf', help='Convert a file to PDF using Adobe PDF Services')
+    pdf_parser = subparsers.add_parser('pdf', help='Convert, export, compress, OCR, linearize, or auto-tag PDF files using Adobe PDF Services')
+    pdf_parser.add_argument('--export', action='store_true', help='Export PDF to another format (instead of converting to PDF)')
+    pdf_parser.add_argument('--compress', action='store_true', help='Compress PDF file (instead of converting to PDF)')
+    pdf_parser.add_argument('--ocr', action='store_true', help='Perform OCR on PDF file (instead of converting to PDF)')
+    pdf_parser.add_argument('--linearize', action='store_true', help='Linearize PDF file for web optimization (instead of converting to PDF)')
+    pdf_parser.add_argument('--autotag', action='store_true', help='Auto-tag PDF for accessibility (instead of converting to PDF)')
+    pdf_parser.add_argument('--shiftHeadings', action='store_true', help='Shift headings when auto-tagging PDF')
+    pdf_parser.add_argument('--generateReport', action='store_true', help='Generate Excel report when auto-tagging PDF')
     pdf_parser.add_argument('-i', '--input', required=True, help='Path to the input file to convert')
-    pdf_parser.add_argument('-o', '--output', required=True, help='Path to the output PDF file')
+    pdf_parser.add_argument('-o', '--output', required=True, help='Path to the output file')
+    pdf_parser.add_argument('--ocrLang', default='en-US', 
+                          choices=['da-DK', 'lt-LT', 'sl-SI', 'el-GR', 'ru-RU', 'en-US', 'zh-HK', 'hu-HU', 'et-EE', 
+                                  'pt-BR', 'uk-UA', 'nb-NO', 'pl-PL', 'lv-LV', 'fi-FI', 'ja-JP', 'es-ES', 'bg-BG', 
+                                  'en-GB', 'cs-CZ', 'mt-MT', 'de-DE', 'hr-HR', 'sk-SK', 'sr-SR', 'ca-CA', 'mk-MK', 
+                                  'ko-KR', 'de-CH', 'nl-NL', 'zh-CN', 'sv-SE', 'it-IT', 'no-NO', 'tr-TR', 'fr-FR', 
+                                  'ro-RO', 'iw-IL'],
+                          help='OCR language for PDF export/OCR (default: en-US)')
+    pdf_parser.add_argument('--ocrType', default='searchable_image',
+                          choices=['searchable_image', 'searchable_image_exact'],
+                          help='OCR type for PDF OCR (default: searchable_image)')
+    pdf_parser.add_argument('--compressionLevel', default='MEDIUM', 
+                          choices=['LOW', 'MEDIUM', 'HIGH', 'low', 'medium', 'high'],
+                          help='Compression level for PDF compression (default: MEDIUM)')
     pdf_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information')
     pdf_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
 
