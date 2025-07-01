@@ -23,7 +23,7 @@ from services.speech import generate_speech, get_available_voices, get_available
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
 from services.video import generate_video, check_video_job_status, download_video
-from services.pdf import upload_file_to_pdf_services, convert_to_pdf, check_pdf_job_status, export_pdf, get_target_format_from_extension, validate_ocr_language, compress_pdf, validate_compression_level, ocr_pdf, validate_ocr_language_for_ocr, validate_ocr_type, linearize_pdf, autotag_pdf, download_autotag_results
+from services.pdf import upload_file_to_pdf_services, convert_to_pdf, check_pdf_job_status, export_pdf, get_target_format_from_extension, validate_ocr_language, compress_pdf, validate_compression_level, ocr_pdf, validate_ocr_language_for_ocr, validate_ocr_type, linearize_pdf, autotag_pdf, download_autotag_results, add_watermark, download_file
 from config.settings import (
     IMAGE_GENERATION_API_URL,
     SPEECH_API_URL,
@@ -2625,6 +2625,62 @@ def handle_pdf_command(args, access_token):
     elif args.autotag:
         # Auto-tag PDF file
         handle_pdf_autotag(args, access_token)
+    elif args.watermark:
+        # Add watermark to PDF
+        if not args.watermark_file:
+            print("Error: Watermark file (-w/--watermark-file) is required for watermark operation")
+            return 1
+        
+        print(f"Adding watermark to {args.input}...")
+        print(f"Watermark file: {args.watermark_file}")
+        print(f"Appear on foreground: {args.appearOnForeground}")
+        print(f"Opacity: {args.opacity}%")
+        
+        try:
+            # Step 1: Upload input PDF
+            print("Step 1: Uploading input PDF to Adobe PDF Services...")
+            input_asset_id = upload_file_to_pdf_services(access_token, args.input, args.debug)
+            
+            # Step 2: Upload watermark PDF
+            print("Step 2: Uploading watermark PDF to Adobe PDF Services...")
+            watermark_asset_id = upload_file_to_pdf_services(access_token, args.watermark_file, args.debug)
+            
+            # Step 3: Add watermark
+            print("Step 3: Adding watermark to PDF...")
+            result = add_watermark(
+                access_token, 
+                input_asset_id, 
+                watermark_asset_id,
+                args.appearOnForeground,
+                args.opacity,
+                args.debug
+            )
+            
+            # Step 4: Poll for completion and download
+            print("Step 4: Waiting for watermark operation to complete...")
+            completed_result = check_pdf_job_status(result['statusUrl'], access_token, args.debug)
+            
+            # Step 5: Download the result
+            print("Step 5: Downloading watermarked PDF...")
+            if completed_result.get('status') == 'done' and 'asset' in completed_result:
+                asset = completed_result['asset']
+                download_uri = asset.get('downloadUri')
+                if download_uri:
+                    download_file(download_uri, args.output, args.silent, args.debug)
+                else:
+                    print("Error: No download URI found in asset")
+                    return 1
+            else:
+                print("Error: Job did not complete successfully")
+                print(f"Status: {completed_result.get('status')}")
+                return 1
+            
+            if not args.silent:
+                print(f"✓ Watermarked PDF saved: {args.output}")
+                
+        except Exception as e:
+            print(f"Error: {e}")
+            return 1
     else:
         # Convert file to PDF
         handle_pdf_convert(args, access_token)

@@ -691,6 +691,93 @@ def autotag_pdf(access_token: str, asset_id: str, shift_headings: bool = False, 
         except json.JSONDecodeError as e:
             raise Exception(f"Invalid JSON response from Adobe PDF Services API: {e}")
 
+def add_watermark(access_token: str, input_asset_id: str, watermark_asset_id: str, 
+                 appear_on_foreground: bool = True, opacity: int = 50, debug: bool = False) -> Dict[str, Any]:
+    """
+    Add watermark to a PDF using Adobe PDF Services.
+    
+    Args:
+        access_token (str): The authentication token
+        input_asset_id (str): The asset ID of the input PDF
+        watermark_asset_id (str): The asset ID of the watermark PDF
+        appear_on_foreground (bool): Whether watermark appears on foreground (default: True)
+        opacity (int): Watermark opacity percentage (default: 50)
+        debug (bool): Whether to show debug information
+    
+    Returns:
+        dict: Response containing job ID and status URL
+    
+    Raises:
+        Exception: If watermark request fails
+    """
+    api_key = os.environ.get('FIREFLY_SERVICES_CLIENT_ID')
+    if not api_key:
+        raise ValueError("FIREFLY_SERVICES_CLIENT_ID is not set in environment")
+    
+    # Validate opacity
+    if not 0 <= opacity <= 100:
+        raise ValueError("Opacity must be between 0 and 100")
+    
+    headers = {
+        'x-api-key': api_key,
+        'x-request-id': f'ffcli-{int(time.time())}',
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        "inputDocumentAssetID": input_asset_id,
+        "watermarkDocumentAssetID": watermark_asset_id,
+        "appearance": {
+            "appearOnForeground": appear_on_foreground,
+            "opacity": opacity
+        }
+    }
+    
+    if debug:
+        print(f"Making request to: https://pdf-services-ue1.adobe.io/operation/addwatermark")
+        print(f"Headers: {headers}")
+        print(f"Payload: {payload}")
+    
+    response = requests.post(
+        'https://pdf-services-ue1.adobe.io/operation/addwatermark',
+        headers=headers,
+        json=payload
+    )
+    response.raise_for_status()
+    
+    if debug:
+        print(f"Response status: {response.status_code}")
+        print(f"Response headers: {dict(response.headers)}")
+        print(f"Response text: {response.text}")
+    
+    # For 201 responses, we expect the status URL in the location header, not JSON body
+    if response.status_code == 201:
+        # Extract status URL from location header
+        status_url = response.headers.get('location')
+        if not status_url:
+            raise Exception("No location header in response from Adobe PDF Services API")
+        
+        if debug:
+            print(f"Status URL from location header: {status_url}")
+        
+        # Extract job ID from the status URL
+        job_id = status_url.split('/')[-2] if '/' in status_url else 'unknown'
+        
+        return {
+            'jobId': job_id,
+            'statusUrl': status_url
+        }
+    else:
+        # For other status codes, try to parse JSON
+        try:
+            data = response.json()
+            if debug:
+                print(f"Parsed response: {data}")
+            return data
+        except json.JSONDecodeError as e:
+            raise Exception(f"Invalid JSON response from Adobe PDF Services API: {e}")
+
 def download_file(url: str, output_file: str, silent: bool = False, debug: bool = False) -> None:
     """
     Download a file from a URL to a local path.

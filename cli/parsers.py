@@ -219,14 +219,18 @@ def create_parser():
     pdf_upload_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
 
     # PDF conversion command
-    pdf_parser = subparsers.add_parser('pdf', help='Convert, export, compress, OCR, linearize, or auto-tag PDF files using Adobe PDF Services')
+    pdf_parser = subparsers.add_parser('pdf', help='Convert, export, compress, OCR, linearize, auto-tag, or watermark PDF files using Adobe PDF Services')
     pdf_parser.add_argument('--export', action='store_true', help='Export PDF to another format (instead of converting to PDF)')
     pdf_parser.add_argument('--compress', action='store_true', help='Compress PDF file (instead of converting to PDF)')
     pdf_parser.add_argument('--ocr', action='store_true', help='Perform OCR on PDF file (instead of converting to PDF)')
     pdf_parser.add_argument('--linearize', action='store_true', help='Linearize PDF file for web optimization (instead of converting to PDF)')
     pdf_parser.add_argument('--autotag', action='store_true', help='Auto-tag PDF for accessibility (instead of converting to PDF)')
+    pdf_parser.add_argument('--watermark', action='store_true', help='Add watermark to PDF (instead of converting to PDF)')
     pdf_parser.add_argument('--shiftHeadings', action='store_true', help='Shift headings when auto-tagging PDF')
     pdf_parser.add_argument('--generateReport', action='store_true', help='Generate Excel report when auto-tagging PDF')
+    pdf_parser.add_argument('-w', '--watermark-file', help='Path to the watermark PDF file')
+    pdf_parser.add_argument('--appearOnForeground', action='store_true', default=True, help='Show watermark on foreground (default: True)')
+    pdf_parser.add_argument('--opacity', type=int, default=50, help='Watermark opacity percentage (default: 50)')
     pdf_parser.add_argument('-i', '--input', required=True, help='Path to the input file to convert')
     pdf_parser.add_argument('-o', '--output', required=True, help='Path to the output file')
     pdf_parser.add_argument('--ocrLang', default='en-US', 
