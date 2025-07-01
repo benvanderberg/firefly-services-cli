@@ -212,4 +212,17 @@ def create_parser():
     models_parser.add_argument('--csv', action='store_true', help='Output as CSV instead of table')
     models_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information including full API response')
 
+    # PDF upload command
+    pdf_upload_parser = subparsers.add_parser('pdfupload', help='Upload a PDF file to Adobe PDF Services')
+    pdf_upload_parser.add_argument('-f', '--file', required=True, help='Path to the PDF file to upload')
+    pdf_upload_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information')
+    pdf_upload_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
+
+    # PDF conversion command
+    pdf_parser = subparsers.add_parser('pdf', help='Convert a file to PDF using Adobe PDF Services')
+    pdf_parser.add_argument('-i', '--input', required=True, help='Path to the input file to convert')
+    pdf_parser.add_argument('-o', '--output', required=True, help='Path to the output PDF file')
+    pdf_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information')
+    pdf_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
+
     return parser 

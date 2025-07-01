@@ -23,6 +23,7 @@ from services.speech import generate_speech, get_available_voices, get_available
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
 from services.video import generate_video, check_video_job_status, download_video
+from services.pdf import upload_file_to_pdf_services, convert_to_pdf, check_pdf_job_status
 from config.settings import (
     IMAGE_GENERATION_API_URL,
     SPEECH_API_URL,
@@ -164,6 +165,10 @@ def handle_command(args):
         handle_list_custom_models_command(args, access_token)
     elif args.command == 'video':
         handle_video_command(args, access_token)
+    elif args.command == 'pdfupload':
+        handle_pdf_upload_command(args, access_token)
+    elif args.command == 'pdf':
+        handle_pdf_command(args, access_token)
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
@@ -2159,7 +2164,7 @@ def check_job_status(status_url, access_token, silent=False, debug=False, rate_l
         if debug:
             print("\nStatus Response:", status_data)
         
-        if status_data.get('status') == 'succeeded':
+        if status_data.get('status') == 'succeeded' or status_data.get('status') == 'done':
             return status_data
         elif status_data.get('status') == 'failed':
             raise Exception(f"Job failed: {status_data.get('error', 'Unknown error')}")
@@ -2586,6 +2591,118 @@ def handle_video_command(args, access_token):
     except Exception as e:
         elapsed_time = time.time() - start_time
         print(f"Error generating video: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+def handle_pdf_command(args, access_token):
+    """Handle the PDF conversion command."""
+    import os
+    
+    # Validate input file exists
+    if not os.path.exists(args.input):
+        print(f"Error: Input file '{args.input}' does not exist")
+        sys.exit(1)
+    
+    # Validate output file has .pdf extension
+    if not args.output.lower().endswith('.pdf'):
+        print(f"Error: Output file must have .pdf extension")
+        sys.exit(1)
+    
+    # Create output directory if it doesn't exist
+    output_dir = os.path.dirname(args.output)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    if not args.silent:
+        print(f"Converting {args.input} to PDF...")
+    
+    try:
+        # Step 1: Upload the file to get asset ID
+        if not args.silent:
+            print("Step 1: Uploading file to Adobe PDF Services...")
+        
+        asset_id = upload_file_to_pdf_services(access_token, args.input, args.debug)
+        
+        if not args.silent:
+            print(f"Asset ID: {asset_id}")
+            print(f"Step 2: Converting to PDF...")
+        
+        # Step 2: Convert to PDF
+        job_info = convert_to_pdf(access_token, asset_id, args.debug)
+        
+        if not args.silent:
+            print(f"Job ID: {job_info['jobId']}")
+            print("Polling for job completion...")
+        
+        # Step 3: Poll for completion and download result
+        result = check_pdf_job_status(job_info['statusUrl'], access_token, args.debug)
+        
+        if args.debug:
+            print(f"Final result: {result}")
+        
+        # Check for the download URI in the response
+        if result.get('status') == 'done' and 'asset' in result:
+            asset = result['asset']
+            download_uri = asset.get('downloadUri')
+            if download_uri:
+                if args.debug:
+                    print(f"Downloading PDF from: {download_uri}")
+                download_file(download_uri, args.output, args.silent, args.debug)
+                if not args.silent:
+                    print(f"✓ PDF created successfully: {args.output}")
+                return
+            else:
+                print("Error: No download URI found in asset")
+                sys.exit(1)
+        else:
+            print("Error: Job did not complete successfully")
+            print(f"Status: {result.get('status')}")
+            sys.exit(1)
+        
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e}")
+        if args.debug:
+            print(f"Response: {e.response.text}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error converting to PDF: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+def handle_pdf_upload_command(args, access_token):
+    """Handle the PDF upload command."""
+    import os
+    
+    # Validate file exists
+    if not os.path.exists(args.file):
+        print(f"Error: File '{args.file}' does not exist")
+        sys.exit(1)
+    
+    if not args.silent:
+        print(f"Uploading {args.file} to Adobe PDF Services...")
+    
+    try:
+        asset_id = upload_file_to_pdf_services(access_token, args.file, args.debug)
+        
+        if not args.silent:
+            print(f"✓ File uploaded successfully!")
+            print(f"Asset ID: {asset_id}")
+        else:
+            print(asset_id)
+        
+        return asset_id
+        
+    except requests.exceptions.HTTPError as e:
+        print(f"HTTP Error: {e}")
+        if args.debug:
+            print(f"Response: {e.response.text}")
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error uploading file: {e}")
         if args.debug:
             import traceback
             traceback.print_exc()
