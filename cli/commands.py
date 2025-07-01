@@ -20,7 +20,7 @@ from utils.storage import upload_to_azure_storage
 from utils.rate_limiter import RateLimiter
 from utils.filename import parse_size, parse_prompt_variations, get_variation_filename, get_unique_filename, replace_filename_tokens
 from services.image import generate_image, parse_model_variations, parse_style_ref_variations, generate_similar_image, expand_image, fill_image, create_mask
-from services.speech import generate_speech, get_available_voices, parse_voice_variations, get_voice_id_by_name
+from services.speech import generate_speech, get_available_voices, get_available_avatars, parse_voice_variations, get_voice_id_by_name, generate_avatar, get_avatar_id_by_name
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
 from services.video import generate_video, check_video_job_status, download_video
@@ -143,10 +143,14 @@ def handle_command(args):
         handle_similar_image_command(args, access_token)
     elif args.command in ['tts', 'speech']:
         handle_tts_command(args, access_token)
+    elif args.command == 'avatar':
+        handle_avatar_command(args, access_token)
     elif args.command == 'dub':
         handle_dub_command(args, access_token)
     elif args.command in ['voices', 'v']:
         handle_voices_command(args, access_token)
+    elif args.command in ['avatar-list', 'al']:
+        handle_avatar_list_command(args, access_token)
     elif args.command in ['transcribe', 'trans']:
         handle_transcribe_command(args, access_token)
     elif args.command == 'expand':
@@ -891,18 +895,17 @@ def handle_tts_command(args, access_token):
             'style': None
         })
     
-    # Add voice name + style combinations
+    # Add voice name combinations (without style)
     for voice_name in voice_names:
-        for style in voice_styles:
-            voice_id = get_voice_id_by_name(access_token, voice_name, style)
-            if voice_id:
-                voice_combinations.append({
-                    'id': voice_id,
-                    'name': voice_name,
-                    'style': style
-                })
-            else:
-                print(f"Warning: No voice ID found for name '{voice_name}' with style '{style}'")
+        voice_id = get_voice_id_by_name(access_token, voice_name, None)
+        if voice_id:
+            voice_combinations.append({
+                'id': voice_id,
+                'name': voice_name,
+                'style': None
+            })
+        else:
+            print(f"Warning: No voice ID found for name '{voice_name}'")
 
     if not voice_combinations:
         print("Error: No valid voice combinations found")
@@ -1078,7 +1081,7 @@ def handle_tts_command(args, access_token):
                         # Poll the status URL until the job is complete
                         result = check_job_status(response['statusUrl'], access_token, args.silent, args.debug, rate_limiter)
                         
-                        if result.get('status') == 'succeeded' and 'output' in result and 'url' in result['output']:
+                        if result.get('status') == 'succeeded' and 'output' in result:
                             # Download the audio file
                             audio_url = result['output']['url']
                             
@@ -1123,6 +1126,353 @@ def handle_tts_command(args, access_token):
             tasks.append((tts_task, combo, paragraph, info))
 
     # Process tasks in parallel with rate limiting
+    results = process_tasks_parallel(tasks, rate_limiter)
+
+    # Print summary
+    success_count = sum(1 for r in results if r)
+    print(f"\nCompleted {success_count} of {len(tasks)} variations successfully")
+
+def handle_avatar_command(args, access_token):
+    """Handle avatar generation command"""
+    # Get text from file or direct input
+    text = get_text_from_file_or_input(args.text, args.file)
+    if not text:
+        print("Error: No text provided. Use -t for direct text or -f for a text file.")
+        return
+
+    # If input is a Markdown file, save the converted text to a .txt file
+    if args.file and args.file.lower().endswith('.md'):
+        txt_file = os.path.splitext(args.file)[0] + '.txt'
+        try:
+            with open(txt_file, 'w', encoding='utf-8') as f:
+                f.write(text)
+            if args.debug:
+                print(f"Converted Markdown to text and saved to: {txt_file}")
+            # Update the file path to use the converted text file
+            args.file = txt_file
+        except Exception as e:
+            print(f"Error saving converted text file: {str(e)}")
+            return
+
+    # Parse voice and avatar variations
+    voice_ids = parse_voice_variations(args.voice_id) if args.voice_id else []
+    voice_names = parse_voice_variations(args.voice) if args.voice else []
+    avatar_ids = parse_voice_variations(args.avatar_id) if args.avatar_id else []
+    avatar_names = parse_voice_variations(args.avatar) if args.avatar else []
+
+    # Validate input
+    if not voice_ids and not voice_names:
+        print("Error: Either --voice-id or --voice must be specified")
+        return
+
+    if not avatar_ids and not avatar_names:
+        print("Error: Either --avatar-id or --avatar must be specified")
+        return
+
+    # Create rate limiter for API calls using environment variable
+    throttle_limit = int(os.getenv('THROTTLE_LIMIT_FIREFLY', 5))
+    throttle_period = int(os.getenv('THROTTLE_PERIOD_SECONDS', 60))
+    throttle_min_delay = float(os.getenv('THROTTLE_MIN_DELAY_SECONDS', 0.0))
+    rate_limiter = RateLimiter(throttle_limit, throttle_period, throttle_min_delay)
+
+    # Prepare voice combinations
+    voice_combinations = []
+    
+    # Add direct voice IDs
+    for voice_id in voice_ids:
+        voice_combinations.append({
+            'id': voice_id,
+            'name': voice_id,  # Use ID as name for direct voice IDs
+            'style': None
+        })
+    
+    # Add voice name combinations (without style)
+    for voice_name in voice_names:
+        voice_id = get_voice_id_by_name(access_token, voice_name, None)
+        if voice_id:
+            voice_combinations.append({
+                'id': voice_id,
+                'name': voice_name,
+                'style': None
+            })
+        else:
+            print(f"Warning: No voice ID found for name '{voice_name}'")
+
+    if not voice_combinations:
+        print("Error: No valid voice combinations found")
+        return
+
+    # Prepare avatar combinations
+    avatar_combinations = []
+    
+    # Add direct avatar IDs
+    for avatar_id in avatar_ids:
+        avatar_combinations.append({
+            'id': avatar_id,
+            'name': avatar_id  # Use ID as name for direct avatar IDs
+        })
+    
+    # Add avatar name combinations
+    for avatar_name in avatar_names:
+        avatar_id = get_avatar_id_by_name(access_token, avatar_name)
+        if avatar_id:
+            avatar_combinations.append({
+                'id': avatar_id,
+                'name': avatar_name
+            })
+        else:
+            print(f"Warning: No avatar ID found for name '{avatar_name}'")
+
+    if not avatar_combinations:
+        print("Error: No valid avatar combinations found")
+        return
+
+    # Show progress table
+    total_combinations = len(voice_combinations) * len(avatar_combinations)
+    print(f"\nGenerating {total_combinations} total variations:")
+    print(f"  • {len(voice_combinations)} voice combinations")
+    print(f"  • {len(avatar_combinations)} avatar combinations")
+    print(f"\nUsing parallel processing with rate limit of {throttle_limit} calls per minute\n")
+
+    # Print voice combinations
+    print("\nVoice Combinations:")
+    for i, combo in enumerate(voice_combinations, 1):
+        print(f"{i}. ID: {combo['id']}, Name: {combo['name']}, Style: {combo['style']}")
+
+    # Print avatar combinations
+    print("\nAvatar Combinations:")
+    for i, combo in enumerate(avatar_combinations, 1):
+        print(f"{i}. ID: {combo['id']}, Name: {combo['name']}")
+
+    # Split text into paragraphs if requested
+    paragraphs = []
+    paragraph_info = []  # Store info about each paragraph
+    if args.p_split and args.file:
+        # Split by double newlines and filter out empty paragraphs
+        raw_paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        
+        if args.debug:
+            print(f"\nFound {len(raw_paragraphs)} paragraphs in the text file")
+            for i, p in enumerate(raw_paragraphs, 1):
+                print(f"\nParagraph {i}:")
+                print(f"  Length: {len(p)} characters")
+                print(f"  Preview: {p[:100] + '...' if len(p) > 100 else p}")
+        
+        # Process each paragraph
+        i = 0
+        while i < len(raw_paragraphs):
+            para = raw_paragraphs[i]
+            para_num = i + 1
+            
+            # If paragraph is too short and not the last one, combine with next paragraph
+            if len(para) < 15 and i < len(raw_paragraphs) - 1:
+                if args.debug:
+                    print(f"\nCombining short paragraph {para_num} with next paragraph")
+                next_para = raw_paragraphs[i + 1]
+                combined_para = f"{para} {next_para}"
+                if args.debug:
+                    print(f"  Combined length: {len(combined_para)} characters")
+                    print(f"  Preview: {combined_para[:100] + '...' if len(combined_para) > 100 else combined_para}")
+                para = combined_para
+                i += 1  # Skip the next paragraph since we combined it
+            
+            # Split long paragraphs into sentences if they exceed 1000 characters
+            if len(para) > 1000:
+                # Split into sentences (basic split on period + space)
+                sentences = re.split(r'(?<=[.!?])\s+', para)
+                sentences = [s.strip() for s in sentences if s.strip()]
+                
+                if args.debug:
+                    print(f"\nSplitting paragraph {para_num} into {len(sentences)} sentences")
+                
+                # Add each sentence as a separate paragraph if it's long enough
+                for j, sentence in enumerate(sentences, 1):
+                    if len(sentence) >= 15:  # Only include sentences longer than 15 chars
+                        paragraphs.append(sentence)
+                        paragraph_info.append({
+                            'para_num': para_num,
+                            'total_paras': len(raw_paragraphs),
+                            'sentence_num': j,
+                            'total_sentences': len(sentences),
+                            'char_count': len(sentence),
+                            'is_split': True
+                        })
+                        if args.debug:
+                            print(f"  Split sentence {j}: {sentence[:50]}...")
+            else:
+                # Add the paragraph as is if it's not too long
+                paragraphs.append(para)
+                paragraph_info.append({
+                    'para_num': para_num,
+                    'total_paras': len(raw_paragraphs),
+                    'sentence_num': 1,
+                    'total_sentences': 1,
+                    'char_count': len(para),
+                    'is_split': False
+                })
+                if args.debug:
+                    print(f"  Keeping as single paragraph: {para[:50]}...")
+            
+            i += 1
+        
+        if args.debug:
+            print(f"\nFinal split into {len(paragraphs)} segments:")
+            for i, (p, info) in enumerate(zip(paragraphs, paragraph_info), 1):
+                print(f"\nSegment {i}:")
+                print(f"  Paragraph {info['para_num']} of {info['total_paras']}")
+                print(f"  Sentence {info['sentence_num']} of {info['total_sentences']}")
+                print(f"  Characters: {info['char_count']}")
+                print(f"  Split from longer paragraph: {info['is_split']}")
+                print(f"  Preview: {p[:100] + '...' if len(p) > 100 else p}")
+    else:
+        # For non-split text, only process if it's long enough
+        if len(text) >= 15:
+            paragraphs = [text]
+            paragraph_info = [{
+                'para_num': 1,
+                'total_paras': 1,
+                'sentence_num': 1,
+                'total_sentences': 1,
+                'char_count': len(text),
+                'is_split': False
+            }]
+        else:
+            print("Error: Input text must be at least 15 characters long")
+            return
+
+    # Create tasks for parallel processing
+    tasks = []
+    for voice_combo in voice_combinations:
+        for avatar_combo in avatar_combinations:
+            for i, (paragraph, info) in enumerate(zip(paragraphs, paragraph_info), 1):
+                def create_avatar_task(vc, ac, para, info):
+                    def avatar_task():
+                        try:
+                            # Generate avatar video
+                            if args.debug:
+                                print(f"\nGenerating avatar video with voice: {vc['id']} ({vc['name']} - {vc['style']})")
+                                print(f"Avatar: {ac['id']} ({ac['name']})")
+                                print(f"Processing paragraph {info['para_num']} of {info['total_paras']}")
+                                if info['is_split']:
+                                    print(f"Segment {info['sentence_num']} of {info['total_sentences']} sentences")
+                            
+                            # Create tokens for filename
+                            tokens = {
+                                'date': datetime.now().strftime('%Y-%m-%d'),
+                                'time': datetime.now().strftime('%H-%M-%S'),
+                                'datetime': datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
+                                'voice_id': vc['id'],
+                                'voice_name': vc['name'],
+                                'voice_style': vc['style'] or '',
+                                'avatar_id': ac['id'],
+                                'avatar_name': ac['name'],
+                                'locale_code': args.locale,
+                                'para_num': f"{info['para_num']:02d}",
+                                'total_paras': f"{info['total_paras']:02d}",
+                                'sentence_num': f"{info['sentence_num']:02d}",
+                                'total_sentences': f"{info['total_sentences']:02d}",
+                                'char_count': f"{info['char_count']:02d}"
+                            }
+                            
+                            # Add paragraph number to output path if splitting paragraphs
+                            if args.p_split:
+                                output_path = args.output.format(**tokens)
+                            else:
+                                output_path = args.output.format(**tokens)
+                            
+                            if args.debug:
+                                print(f"Original output path: {args.output}")
+                                print(f"Tokens: {tokens}")
+                                print(f"Replaced output path: {output_path}")
+                            
+                            # Create output directory if it doesn't exist
+                            output_dir = os.path.dirname(output_path)
+                            if output_dir:
+                                os.makedirs(output_dir, exist_ok=True)
+                                if args.debug:
+                                    print(f"Created output directory: {output_dir}")
+                            
+                            # Generate avatar video
+                            response = generate_avatar(
+                                access_token=access_token,
+                                text=para,
+                                voice_id=vc['id'],
+                                avatar_id=ac['id'],
+                                locale_code=args.locale,
+                                debug=args.debug
+                            )
+                            
+                            if response and 'jobId' in response and 'statusUrl' in response:
+                                if args.debug:
+                                    print(f"Job ID: {response['jobId']}")
+                                    print("Polling for job completion...")
+                                
+                                # Poll the status URL until the job is complete
+                                result = check_job_status(response['statusUrl'], access_token, args.silent, args.debug, rate_limiter)
+                                
+                                if result.get('status') == 'succeeded' and 'output' in result:
+                                    # Extract video URL from the response
+                                    output = result['output']
+                                    video_url = None
+                                    
+                                    # Check for direct URL first
+                                    if 'url' in output:
+                                        video_url = output['url']
+                                    # Check for nested destination URL (avatar API format)
+                                    elif 'destination' in output and 'url' in output['destination']:
+                                        video_url = output['destination']['url']
+                                    
+                                    if video_url:
+                                        # Download the video file
+                                        try:
+                                            if args.debug:
+                                                print(f"Making request to download file from {video_url}")
+                                            response = requests.get(video_url, stream=True)
+                                            response.raise_for_status()
+                                            
+                                            # Ensure the output file has .mp4 extension
+                                            if not output_path.lower().endswith('.mp4'):
+                                                output_path = os.path.splitext(output_path)[0] + '.mp4'
+                                            
+                                            # Download the file
+                                            with open(output_path, 'wb') as f:
+                                                for chunk in response.iter_content(chunk_size=8192):
+                                                    if chunk:
+                                                        f.write(chunk)
+                                            
+                                            if not args.silent:
+                                                print(f"✓ Generated avatar video: {output_path}")
+                                            
+                                            return True
+                                            
+                                        except Exception as e:
+                                            if args.debug:
+                                                print(f"Error downloading file: {str(e)}")
+                                            return False
+                                    else:
+                                        if args.debug:
+                                            print(f"No video URL found in response: {result}")
+                                        return False
+                                else:
+                                    if args.debug:
+                                        print(f"Job failed or no output URL found: {result}")
+                                    return False
+                            else:
+                                if args.debug:
+                                    print(f"Invalid response from generate_avatar: {response}")
+                                return False
+                                
+                        except Exception as e:
+                            if args.debug:
+                                print(f"Error in avatar task: {str(e)}")
+                            return False
+                    
+                    return avatar_task
+                
+                task_func = create_avatar_task(voice_combo, avatar_combo, paragraph, info)
+                tasks.append((task_func,))  # Wrap in tuple as expected by process_tasks_parallel
+
+    # Process tasks in parallel
     results = process_tasks_parallel(tasks, rate_limiter)
 
     # Print summary
@@ -1192,6 +1542,50 @@ def handle_voices_command(args, access_token):
             ))
     else:
         print("No voices found or error occurred")
+
+def handle_avatar_list_command(args, access_token):
+    """Handle the avatar-list command."""
+    # List available avatars
+    avatars = get_available_avatars(access_token)
+    if avatars:
+        # Sort avatars by status (Active first) and then by name
+        active_avatars = [v for v in avatars if v.get('status') == 'Active']
+        inactive_avatars = [v for v in avatars if v.get('status') == 'Inactive']
+        
+        # Prepare table data with additional fields
+        def prepare_avatar_data(avatar_list):
+            return [[
+                avatar.get('avatarId', 'N/A'),
+                avatar.get('displayName', 'N/A'),
+                avatar.get('gender', 'N/A'),
+                avatar.get('style', 'N/A'),
+                avatar.get('avatarType', 'N/A'),
+                avatar.get('status', 'N/A'),
+                avatar.get('wordsPerMinute', 'N/A'),
+                'Yes' if avatar.get('sampleURL') else 'No'
+            ] for avatar in sorted(avatar_list, key=lambda x: x.get('displayName', ''))]
+        
+        # Print active avatars first
+        if active_avatars:
+            print("\nActive Avatars:")
+            active_table = prepare_avatar_data(active_avatars)
+            print(tabulate(
+                active_table,
+                headers=['ID', 'Name', 'Gender', 'Style', 'Type', 'Status', 'WPM', 'Sample'],
+                tablefmt='grid'
+            ))
+        
+        # Print inactive avatars
+        if inactive_avatars:
+            print("\nInactive Avatars:")
+            inactive_table = prepare_avatar_data(inactive_avatars)
+            print(tabulate(
+                inactive_table,
+                headers=['ID', 'Name', 'Gender', 'Style', 'Type', 'Status', 'WPM', 'Sample'],
+                tablefmt='grid'
+            ))
+    else:
+        print("No avatars found or error occurred")
 
 def format_time(seconds):
     """Convert seconds to MM:SS format"""
@@ -1495,7 +1889,7 @@ def handle_fill_command(args, access_token):
             if args.debug:
                 print(f"Job ID: {job_info['jobId']}")
                 print("Polling for job completion...")
-            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
+            result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug, rate_limiter)
             if 'result' in result and 'outputs' in result['result']:
                 outputs = result['result']['outputs']
                 if outputs:

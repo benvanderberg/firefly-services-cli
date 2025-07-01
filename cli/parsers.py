@@ -115,6 +115,24 @@ def create_parser():
     tts_parser.add_argument('-ow', '--overwrite', action='store_true',
                           help='Overwrite existing files instead of adding number suffix')
 
+    # Avatar generation command
+    avatar_parser = subparsers.add_parser('avatar', help='Generate avatar video with speech')
+    avatar_parser.add_argument('-t', '--text', help='Text for the avatar to speak')
+    avatar_parser.add_argument('-f', '--file', help='Path to text file for the avatar to speak')
+    avatar_parser.add_argument('-o', '--output', required=True, help='Output file path for the generated video')
+    avatar_parser.add_argument('-v', '--voice', help='Voice name to use. Can be a single name or a list in [name1,name2,...] format')
+    avatar_parser.add_argument('-vid', '--voice-id', help='Voice ID to use. Can be a single ID or a list in [id1,id2,...] format')
+    avatar_parser.add_argument('-a', '--avatar', help='Avatar name to use. Can be a single name or a list in [name1,name2,...] format')
+    avatar_parser.add_argument('-aid', '--avatar-id', help='Avatar ID to use. Can be a single ID or a list in [id1,id2,...] format')
+    avatar_parser.add_argument('-l', '--locale', default='en-US', help='Locale code for the text (default: en-US)')
+    avatar_parser.add_argument('--p-split', action='store_true', help='Split text file into paragraphs and process each separately')
+    avatar_parser.add_argument('-d', '--debug', action='store_true',
+                          help='Show debug information including full HTTP request details')
+    avatar_parser.add_argument('-silent', '--silent', action='store_true',
+                          help='Minimize output messages')
+    avatar_parser.add_argument('-ow', '--overwrite', action='store_true',
+                          help='Overwrite existing files instead of adding number suffix')
+
     # Dubbing command
     dub_parser = subparsers.add_parser('dub', help='Dub audio or video content')
     dub_parser.add_argument('-i', '--input', required=True, help='URL of the source media file')
@@ -129,6 +147,9 @@ def create_parser():
 
     # List voices command
     voices_parser = subparsers.add_parser('voices', aliases=['v'], help='List available voices')
+
+    # List avatars command
+    avatar_list_parser = subparsers.add_parser('avatar-list', aliases=['al'], help='List available avatars/voices')
 
     # Transcription command
     transcribe_parser = subparsers.add_parser('transcribe', aliases=['trans'], help='Transcribe audio or video content')

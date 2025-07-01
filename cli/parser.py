@@ -51,6 +51,9 @@ def parse_args():
     # List voices command
     voices_parser = subparsers.add_parser('voices', aliases=['v'], parents=[common_args], help='List available voices')
 
+    # List avatars command
+    avatar_list_parser = subparsers.add_parser('avatar-list', aliases=['al'], parents=[common_args], help='List available avatars/voices')
+
     # Transcription command
     transcribe_parser = subparsers.add_parser('transcribe', aliases=['trans'], parents=[common_args], help='Transcribe audio or video content')
     transcribe_parser.add_argument('--input', required=True, help='Input file path')

@@ -5,7 +5,7 @@ from typing import Dict, Any, Optional
 from utils.storage import upload_to_azure_storage
 
 # Video generation API URL
-VIDEO_GENERATION_API_URL = "https://firefly-beta.adobe.io/v3/videos/generate"
+VIDEO_GENERATION_API_URL = "https://firefly-api.adobe.io/v3/videos/generate"
 
 # Supported video sizes
 VIDEO_SIZES = {
@@ -107,7 +107,7 @@ def generate_video(
     
     # Prepare request headers
     headers = {
-        'x-model-version': 'video1_8_standard',
+        'x-model-version': 'video1_standard',
         'Content-Type': 'application/json',
         'Accept': 'application/json',
         'x-api-key': os.getenv('FIREFLY_SERVICES_CLIENT_ID'),
