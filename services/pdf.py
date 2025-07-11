@@ -944,4 +944,150 @@ def protect_pdf(access_token: str, asset_id: str, owner_password: Optional[str] 
                 print(f"Parsed response: {data}")
             return data
         except json.JSONDecodeError as e:
+            raise Exception(f"Invalid JSON response from Adobe PDF Services API: {e}")
+
+def remove_password(access_token: str, asset_id: str, password: str, debug: bool = False) -> dict:
+    """
+    Remove password protection from a PDF using Adobe PDF Services.
+    Args:
+        access_token (str): The authentication token
+        asset_id (str): The asset ID of the input PDF
+        password (str): The password to remove from the PDF
+        debug (bool): Whether to show debug information
+    Returns:
+        dict: Response containing job ID and status URL
+    Raises:
+        Exception: If password removal request fails
+    """
+    api_key = os.environ.get('FIREFLY_SERVICES_CLIENT_ID')
+    if not api_key:
+        raise ValueError("FIREFLY_SERVICES_CLIENT_ID is not set in environment")
+    headers = {
+        'x-api-key': api_key,
+        'x-request-id': f'ffcli-{int(time.time())}',
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        "assetID": asset_id,
+        "password": password
+    }
+    if debug:
+        print(f"Making request to: https://pdf-services-ue1.adobe.io/operation/removeprotection")
+        print(f"Headers: {headers}")
+        print(f"Payload: {payload}")
+    response = requests.post(
+        'https://pdf-services-ue1.adobe.io/operation/removeprotection',
+        headers=headers,
+        json=payload
+    )
+    response.raise_for_status()
+    if debug:
+        print(f"Response status: {response.status_code}")
+        print(f"Response headers: {dict(response.headers)}")
+        print(f"Response text: {response.text}")
+    if response.status_code == 201:
+        status_url = response.headers.get('location')
+        if not status_url:
+            raise Exception("No location header in response from Adobe PDF Services API")
+        if debug:
+            print(f"Status URL from location header: {status_url}")
+        job_id = status_url.split('/')[-2] if '/' in status_url else 'unknown'
+        return {
+            'jobId': job_id,
+            'statusUrl': status_url
+        }
+    else:
+        try:
+            data = response.json()
+            if debug:
+                print(f"Parsed response: {data}")
+            return data
+        except json.JSONDecodeError as e:
+            raise Exception(f"Invalid JSON response from Adobe PDF Services API: {e}")
+
+def split_pdf(access_token: str, asset_id: str, file_count: Optional[int] = None, 
+               page_count: Optional[int] = None, page_ranges: Optional[list] = None, 
+               debug: bool = False) -> dict:
+    """
+    Split a PDF using Adobe PDF Services.
+    Args:
+        access_token (str): The authentication token
+        asset_id (str): The asset ID of the input PDF
+        file_count (int): Number of files to split PDF into
+        page_count (int): Number of pages per split file
+        page_ranges (list): List of page ranges to split (e.g., [{'start': 1, 'end': 5}, {'start': 6, 'end': 8}])
+        debug (bool): Whether to show debug information
+    Returns:
+        dict: Response containing job ID and status URL
+    Raises:
+        Exception: If split request fails
+    """
+    api_key = os.environ.get('FIREFLY_SERVICES_CLIENT_ID')
+    if not api_key:
+        raise ValueError("FIREFLY_SERVICES_CLIENT_ID is not set in environment")
+    
+    # Validate that exactly one split option is provided
+    options_count = sum(1 for x in [file_count, page_count, page_ranges] if x is not None)
+    if options_count != 1:
+        raise ValueError("Exactly one split option must be provided: file_count, page_count, or page_ranges")
+    
+    headers = {
+        'x-api-key': api_key,
+        'x-request-id': f'ffcli-{int(time.time())}',
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        "assetID": asset_id,
+        "splitoption": {}
+    }
+    
+    # Add the appropriate split option
+    if file_count is not None:
+        payload["splitoption"]["fileCount"] = file_count
+    elif page_count is not None:
+        payload["splitoption"]["pageCount"] = page_count
+    elif page_ranges is not None:
+        payload["splitoption"]["pageRanges"] = page_ranges
+    
+    if debug:
+        print(f"Making request to: https://pdf-services-ue1.adobe.io/operation/splitpdf")
+        print(f"Headers: {headers}")
+        print(f"Payload: {payload}")
+    
+    response = requests.post(
+        'https://pdf-services-ue1.adobe.io/operation/splitpdf',
+        headers=headers,
+        json=payload
+    )
+    response.raise_for_status()
+    
+    if debug:
+        print(f"Response status: {response.status_code}")
+        print(f"Response headers: {dict(response.headers)}")
+        print(f"Response text: {response.text}")
+    
+    if response.status_code == 201:
+        status_url = response.headers.get('location')
+        if not status_url:
+            raise Exception("No location header in response from Adobe PDF Services API")
+        
+        if debug:
+            print(f"Status URL from location header: {status_url}")
+        
+        job_id = status_url.split('/')[-2] if '/' in status_url else 'unknown'
+        
+        return {
+            'jobId': job_id,
+            'statusUrl': status_url
+        }
+    else:
+        try:
+            data = response.json()
+            if debug:
+                print(f"Parsed response: {data}")
+            return data
+        except json.JSONDecodeError as e:
             raise Exception(f"Invalid JSON response from Adobe PDF Services API: {e}") 

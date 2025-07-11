@@ -23,7 +23,7 @@ from services.speech import generate_speech, get_available_voices, get_available
 from services.dubbing import dub_media
 from services.transcription import transcribe_media
 from services.video import generate_video, check_video_job_status, download_video
-from services.pdf import upload_file_to_pdf_services, convert_to_pdf, check_pdf_job_status, export_pdf, get_target_format_from_extension, validate_ocr_language, compress_pdf, validate_compression_level, ocr_pdf, validate_ocr_language_for_ocr, validate_ocr_type, linearize_pdf, autotag_pdf, download_autotag_results, add_watermark, protect_pdf, download_file
+from services.pdf import upload_file_to_pdf_services, convert_to_pdf, check_pdf_job_status, export_pdf, get_target_format_from_extension, validate_ocr_language, compress_pdf, validate_compression_level, ocr_pdf, validate_ocr_language_for_ocr, validate_ocr_type, linearize_pdf, autotag_pdf, download_autotag_results, add_watermark, protect_pdf, remove_password, split_pdf, download_file
 from config.settings import (
     IMAGE_GENERATION_API_URL,
     SPEECH_API_URL,
@@ -2736,6 +2736,125 @@ def handle_pdf_command(args, access_token):
             
             if not args.silent:
                 print(f"✓ Protected PDF saved: {args.output}")
+                
+        except Exception as e:
+            print(f"Error: {e}")
+            return 1
+    elif args.remove_password:
+        # Remove password protection from PDF
+        if not args.password:
+            print("Error: Password (-pw/--password) is required for remove password operation")
+            return 1
+        print(f"Removing password protection from {args.input}...")
+        try:
+            # Step 1: Upload input PDF
+            print("Step 1: Uploading input PDF to Adobe PDF Services...")
+            input_asset_id = upload_file_to_pdf_services(access_token, args.input, args.debug)
+            # Step 2: Remove password
+            print("Step 2: Removing password protection...")
+            result = remove_password(
+                access_token,
+                input_asset_id,
+                args.password,
+                args.debug
+            )
+            # Step 3: Poll for completion and download
+            print("Step 3: Waiting for password removal operation to complete...")
+            completed_result = check_pdf_job_status(result['statusUrl'], access_token, args.debug)
+            # Step 4: Download the result
+            print("Step 4: Downloading unprotected PDF...")
+            if completed_result.get('status') == 'done' and 'asset' in completed_result:
+                asset = completed_result['asset']
+                download_uri = asset.get('downloadUri')
+                if download_uri:
+                    download_file(download_uri, args.output, args.silent, args.debug)
+                else:
+                    print("Error: No download URI found in asset")
+                    return 1
+            else:
+                print("Error: Job did not complete successfully")
+                print(f"Status: {completed_result.get('status')}")
+                return 1
+            if not args.silent:
+                print(f"✓ Unprotected PDF saved: {args.output}")
+        except Exception as e:
+            print(f"Error: {e}")
+            return 1
+    elif args.split:
+        # Split PDF into multiple files
+        # Validate that exactly one split option is provided
+        options_count = sum(1 for x in [args.file_count, args.page_count, args.page_ranges] if x is not None)
+        if options_count != 1:
+            print("Error: Exactly one split option must be provided: --file-count, --page-count, or --page-ranges")
+            return 1
+        
+        print(f"Splitting {args.input}...")
+        
+        # Parse page ranges if provided
+        page_ranges = None
+        if args.page_ranges:
+            page_ranges = []
+            for range_str in args.page_ranges:
+                try:
+                    start, end = range_str.split('-')
+                    page_ranges.append({'start': int(start), 'end': int(end)})
+                except ValueError:
+                    print(f"Error: Invalid page range format '{range_str}'. Use format like '1-5'")
+                    return 1
+        
+        try:
+            # Step 1: Upload input PDF
+            print("Step 1: Uploading input PDF to Adobe PDF Services...")
+            input_asset_id = upload_file_to_pdf_services(access_token, args.input, args.debug)
+            
+            # Step 2: Split PDF
+            print("Step 2: Splitting PDF...")
+            result = split_pdf(
+                access_token,
+                input_asset_id,
+                args.file_count,
+                args.page_count,
+                page_ranges,
+                args.debug
+            )
+            
+            # Step 3: Poll for completion and download
+            print("Step 3: Waiting for split operation to complete...")
+            completed_result = check_pdf_job_status(result['statusUrl'], access_token, args.debug)
+            
+            # Step 4: Download the result
+            print("Step 4: Downloading split PDF files...")
+            if completed_result.get('status') == 'done' and 'assetList' in completed_result:
+                asset_list = completed_result['assetList']
+                if not asset_list:
+                    print("Error: No assets found in response")
+                    return 1
+                
+                # Get the base filename without extension
+                base_name = os.path.splitext(args.output)[0]
+                extension = os.path.splitext(args.output)[1]
+                
+                # Download each asset with numbered suffix
+                for i, asset in enumerate(asset_list, 1):
+                    download_uri = asset.get('downloadUri')
+                    if download_uri:
+                        # Create filename with numbered suffix
+                        output_filename = f"{base_name}_{i:02d}{extension}"
+                        if args.debug:
+                            print(f"Downloading asset {i} to: {output_filename}")
+                        download_file(download_uri, output_filename, args.silent, args.debug)
+                        if not args.silent:
+                            print(f"✓ Downloaded: {output_filename}")
+                    else:
+                        print(f"Error: No download URI found in asset {i}")
+                        return 1
+                
+                if not args.silent:
+                    print(f"✓ All {len(asset_list)} split PDF files saved")
+            else:
+                print("Error: Job did not complete successfully")
+                print(f"Status: {completed_result.get('status')}")
+                return 1
                 
         except Exception as e:
             print(f"Error: {e}")
