@@ -2599,16 +2599,94 @@ def handle_video_command(args, access_token):
 def handle_pdf_command(args, access_token):
     """Handle the PDF conversion/export command."""
     import os
+    import glob
     
+    # Handle wildcard patterns for OCR operations
+    if args.ocr and ('*' in args.input or '?' in args.input):
+        # Expand wildcard pattern
+        matching_files = glob.glob(args.input)
+        if not matching_files:
+            print(f"Error: No files found matching pattern '{args.input}'")
+            sys.exit(1)
+        
+        # Filter for PDF files only
+        pdf_files = [f for f in matching_files if f.lower().endswith('.pdf')]
+        if not pdf_files:
+            print(f"Error: No PDF files found matching pattern '{args.input}'")
+            sys.exit(1)
+        
+        if not args.silent:
+            print(f"Found {len(pdf_files)} PDF file(s) to process:")
+            for pdf_file in pdf_files:
+                print(f"  - {pdf_file}")
+            print()
+        
+        # Process each PDF file
+        success_count = 0
+        for pdf_file in pdf_files:
+            try:
+                if not args.silent:
+                    print(f"Processing: {pdf_file}")
+                
+                # Create a copy of args for this file
+                file_args = type('Args', (), {})()
+                for attr in dir(args):
+                    if not attr.startswith('_'):
+                        setattr(file_args, attr, getattr(args, attr))
+                
+                # Set the input file
+                file_args.input = pdf_file
+                
+                # Generate output filename for this file
+                input_path = os.path.splitext(pdf_file)[0]
+                file_args.output = f"{input_path}_ocr.pdf"
+                
+                # Process this file
+                if handle_single_pdf_ocr(file_args, access_token):
+                    success_count += 1
+                    if not args.silent:
+                        print(f"✓ Successfully processed: {pdf_file}")
+                else:
+                    print(f"✗ Failed to process: {pdf_file}")
+                
+                if not args.silent and pdf_file != pdf_files[-1]:
+                    print()  # Add spacing between files
+                    
+            except Exception as e:
+                print(f"✗ Error processing {pdf_file}: {e}")
+                if args.debug:
+                    import traceback
+                    traceback.print_exc()
+        
+        if not args.silent:
+            print(f"\nProcessing complete: {success_count}/{len(pdf_files)} files successful")
+        
+        return
+    
+    # Single file processing (existing logic)
     # Validate input file exists
     if not os.path.exists(args.input):
         print(f"Error: Input file '{args.input}' does not exist")
         sys.exit(1)
     
+    # Handle output filename generation for OCR
+    if args.ocr and not args.output:
+        # Generate output filename by adding _ocr to the input filename
+        input_path = os.path.splitext(args.input)[0]
+        args.output = f"{input_path}_ocr.pdf"
+        if not args.silent:
+            print(f"Auto-generated output filename: {args.output}")
+    
+    # Validate output is provided for non-OCR operations
+    if not args.ocr and not args.output:
+        print("Error: Output file (-o/--output) is required for non-OCR operations")
+        sys.exit(1)
+    
     # Create output directory if it doesn't exist
-    output_dir = os.path.dirname(args.output)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    if args.output:
+        output_dir = os.path.dirname(args.output)
+        if output_dir and not os.path.exists(output_dir):
+            os.makedirs(output_dir)
     
     if args.export:
         # Export PDF to another format
@@ -3081,27 +3159,27 @@ def handle_pdf_compress(args, access_token):
             traceback.print_exc()
         sys.exit(1)
 
-def handle_pdf_ocr(args, access_token):
-    """Handle PDF OCR."""
+def handle_single_pdf_ocr(args, access_token):
+    """Handle PDF OCR for a single file. Returns True on success, False on failure."""
     # Validate input file has .pdf extension
     if not args.input.lower().endswith('.pdf'):
         print(f"Error: Input file must be a PDF file (.pdf extension)")
-        sys.exit(1)
+        return False
     
-    # Validate output file has .pdf extension
-    if not args.output.lower().endswith('.pdf'):
+    # Validate output file has .pdf extension (if provided)
+    if args.output and not args.output.lower().endswith('.pdf'):
         print(f"Error: Output file must have .pdf extension")
-        sys.exit(1)
+        return False
     
     # Validate OCR language
     if not validate_ocr_language_for_ocr(args.ocrLang):
         print(f"Error: Unsupported OCR language: {args.ocrLang}")
-        sys.exit(1)
+        return False
     
     # Validate OCR type
     if not validate_ocr_type(args.ocrType):
         print(f"Error: Invalid OCR type: {args.ocrType}. Must be 'searchable_image' or 'searchable_image_exact'")
-        sys.exit(1)
+        return False
     
     if not args.silent:
         print(f"Performing OCR on {args.input}...")
@@ -3142,25 +3220,33 @@ def handle_pdf_ocr(args, access_token):
                 download_file(download_uri, args.output, args.silent, args.debug)
                 if not args.silent:
                     print(f"✓ PDF OCR completed successfully: {args.output}")
-                return
+                return True
             else:
                 print("Error: No download URI found in asset")
-                sys.exit(1)
+                return False
         else:
             print("Error: Job did not complete successfully")
             print(f"Status: {result.get('status')}")
-            sys.exit(1)
+            return False
         
     except requests.exceptions.HTTPError as e:
         print(f"HTTP Error: {e}")
         if args.debug:
             print(f"Response: {e.response.text}")
-        sys.exit(1)
+        return False
     except Exception as e:
         print(f"Error performing OCR: {e}")
         if args.debug:
             import traceback
             traceback.print_exc()
+        return False
+
+def handle_pdf_ocr(args, access_token):
+    """Handle PDF OCR."""
+    # For single file processing, use the new function
+    if handle_single_pdf_ocr(args, access_token):
+        return
+    else:
         sys.exit(1)
 
 def handle_pdf_linearize(args, access_token):

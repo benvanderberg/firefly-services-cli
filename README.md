@@ -26,6 +26,52 @@ The ff CLI tool streamlines your creative workflow by providing direct command-l
 
 ## Quick Installation
 
+### Windows Installation
+
+For Windows users, you have several installation options:
+
+#### Option 1: Batch File Installation (Recommended)
+```cmd
+# Run the Windows installation script
+install.bat
+```
+
+#### Option 2: PowerShell Installation (Advanced)
+```powershell
+# Run PowerShell as Administrator for automatic PATH setup
+.\install.ps1 -AddToPath
+
+# Or run without Administrator privileges
+.\install.ps1
+```
+
+#### Option 3: Python Package Installation
+```cmd
+# Install as a Python package (requires pip)
+pip install -e .
+
+# This will make 'ff' available system-wide
+```
+
+#### Option 4: Desktop Shortcut (Convenient)
+1. Run the installation script first
+2. Copy `ff.bat` to your desktop or any convenient location
+3. Double-click to run the CLI with a GUI prompt for commands
+
+#### Uninstallation
+To uninstall the CLI on Windows:
+```powershell
+# Remove everything including PATH entries (run as Administrator)
+.\uninstall.ps1 -RemoveFromPath
+
+# Or remove without PATH modification
+.\uninstall.ps1
+```
+
+**Note**: For detailed Windows installation instructions, see [WINDOWS_INSTALL.md](WINDOWS_INSTALL.md).
+
+### macOS/Linux Installation
+
 The easiest way to install the ff CLI is using the provided installation script:
 
 ```bash
@@ -36,7 +82,9 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installation script will:
+### What the Installation Scripts Do
+
+All installation scripts will:
 1. Check for Python 3 installation
 2. Create and activate a virtual environment
 3. Install all required dependencies
@@ -65,7 +113,26 @@ If you prefer to install manually, follow these steps:
 
 ## Usage
 
-After installation, you can use the CLI tool in two ways:
+After installation, you can use the CLI tool in several ways:
+
+### Windows Usage
+
+1. Using the full path:
+   ```cmd
+   bin\ff.bat [command] [options]
+   ```
+
+2. If you've added the bin directory to your PATH (as suggested during installation):
+   ```cmd
+   ff [command] [options]
+   ```
+
+3. If installed as a Python package:
+   ```cmd
+   ff [command] [options]
+   ```
+
+### macOS/Linux Usage
 
 1. Using the full path:
    ```bash
@@ -481,6 +548,114 @@ Options:
 - `-o, --output`: Output file path
 - `-d, --debug`: Enable debug output
 
+### PDF Operations
+Perform various operations on PDF files using Adobe PDF Services.
+
+#### OCR (Optical Character Recognition)
+Make scanned PDFs searchable by adding text layer:
+
+```bash
+# Single file OCR
+ff pdf --ocr -i document.pdf
+
+# Multiple files using wildcards
+ff pdf --ocr -i "*.pdf"
+
+# With custom output filename
+ff pdf --ocr -i document.pdf -o searchable_document.pdf
+
+# With different language and OCR type
+ff pdf --ocr -i document.pdf --ocrLang "es-ES" --ocrType "searchable_image_exact"
+```
+
+**Features:**
+- **Auto-generated output filenames**: If no `-o` is specified, adds `_ocr` to the input filename
+- **Wildcard support**: Process multiple files with patterns like `*.pdf`, `documents/*.pdf`
+- **Multiple languages**: Support for 40+ languages including English, Spanish, French, German, etc.
+- **Two OCR types**: 
+  - `searchable_image` (default): Maintains original image quality
+  - `searchable_image_exact`: Higher accuracy but may affect image quality
+
+**Examples:**
+```bash
+# Process all PDFs in current directory
+ff pdf --ocr -i "*.pdf"
+
+# Process PDFs in a specific folder
+ff pdf --ocr -i "documents/*.pdf"
+
+# Process with different language
+ff pdf --ocr -i "spanish_docs/*.pdf" --ocrLang "es-ES"
+
+# Silent processing for batch operations
+ff pdf --ocr -i "*.pdf" --silent
+```
+
+#### PDF Compression
+Reduce PDF file size:
+
+```bash
+ff pdf --compress -i large.pdf -o compressed.pdf --compressionLevel HIGH
+```
+
+#### PDF Export
+Convert PDF to other formats:
+
+```bash
+ff pdf --export -i document.pdf -o document.docx --ocrLang "en-US"
+```
+
+#### PDF Protection
+Add password protection and encryption:
+
+```bash
+ff pdf --protect -i document.pdf -o protected.pdf -opw "owner123" -upw "user123"
+```
+
+#### PDF Watermarking
+Add watermarks to PDFs:
+
+```bash
+ff pdf --watermark -i document.pdf -w watermark.pdf -o watermarked.pdf
+```
+
+#### PDF Splitting
+Split PDF into multiple files:
+
+```bash
+# Split by file count
+ff pdf --split --file-count 3 -i document.pdf -o split_
+
+# Split by page count
+ff pdf --split --page-count 5 -i document.pdf -o split_
+
+# Split by page ranges
+ff pdf --split --page-ranges "1-5" "6-10" "11-15" -i document.pdf -o split_
+```
+
+#### PDF Linearization
+Optimize PDF for web viewing:
+
+```bash
+ff pdf --linearize -i document.pdf -o optimized.pdf
+```
+
+#### PDF Auto-tagging
+Make PDF accessible for screen readers:
+
+```bash
+ff pdf --autotag -i document.pdf -o accessible.pdf --shiftHeadings --generateReport
+```
+
+**Common Options:**
+- `-i, --input`: Input PDF file or pattern (supports wildcards for OCR)
+- `-o, --output`: Output file path (optional for OCR - auto-generates filename)
+- `--ocrLang`: OCR language code (default: en-US)
+- `--ocrType`: OCR type (searchable_image or searchable_image_exact)
+- `--compressionLevel`: Compression level (LOW, MEDIUM, HIGH)
+- `-d, --debug`: Enable debug output
+- `--silent`: Minimize output messages
+
 ### Transcription
 Transcribe media files to text.
 
@@ -624,9 +799,11 @@ firefly-services-cli/
 
 ## Troubleshooting
 
+### General Issues
+
 1. **Command not found**
    - Make sure you've added the bin directory to your PATH
-   - Try using the full path: `./bin/ff [command]`
+   - Try using the full path: `./bin/ff [command]` (macOS/Linux) or `bin\ff.bat [command]` (Windows)
 
 2. **Authentication errors**
    - Check your `.env` file for correct credentials
@@ -635,6 +812,30 @@ firefly-services-cli/
 3. **File upload errors**
    - Verify your Azure Storage configuration
    - Check if your SAS token is still valid
+
+### Windows-Specific Issues
+
+1. **PowerShell execution policy error**
+   ```powershell
+   # Run PowerShell as Administrator and execute:
+   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+   ```
+
+2. **Python not found in PATH**
+   - Reinstall Python and make sure to check "Add Python to PATH" during installation
+   - Or manually add Python to your system PATH
+
+3. **Virtual environment activation issues**
+   - Use the full path: `venv\Scripts\activate.bat` (Command Prompt) or `venv\Scripts\Activate.ps1` (PowerShell)
+   - Make sure you're running the activation script from the project root directory
+
+4. **ImageMagick not found**
+   - Download and install ImageMagick from: https://imagemagick.org/script/download.php#windows
+   - Make sure to check "Add application directory to your system path" during installation
+
+5. **Permission denied errors**
+   - Run Command Prompt or PowerShell as Administrator
+   - Or use the `-Force` parameter with the PowerShell installation script
 
 ## Contributing
 

@@ -243,8 +243,8 @@ def create_parser():
     pdf_parser.add_argument('-w', '--watermark-file', help='Path to the watermark PDF file')
     pdf_parser.add_argument('--appearOnForeground', action='store_true', default=True, help='Show watermark on foreground (default: True)')
     pdf_parser.add_argument('--opacity', type=int, default=50, help='Watermark opacity percentage (default: 50)')
-    pdf_parser.add_argument('-i', '--input', required=True, help='Path to the input file to convert')
-    pdf_parser.add_argument('-o', '--output', required=True, help='Path to the output file')
+    pdf_parser.add_argument('-i', '--input', required=True, help='Path to the input file to convert (supports wildcards like *.pdf for OCR operations)')
+    pdf_parser.add_argument('-o', '--output', help='Path to the output file (optional for OCR - will auto-generate filename)')
     pdf_parser.add_argument('--ocrLang', default='en-US', 
                           choices=['da-DK', 'lt-LT', 'sl-SI', 'el-GR', 'ru-RU', 'en-US', 'zh-HK', 'hu-HU', 'et-EE', 
                                   'pt-BR', 'uk-UA', 'nb-NO', 'pl-PL', 'lv-LV', 'fi-FI', 'ja-JP', 'es-ES', 'bg-BG', 
