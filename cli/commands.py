@@ -1599,12 +1599,27 @@ def format_time(seconds):
 
 
 # Map output_type → expected file extension. Used to validate that the user's
-# -o path matches their --output-type.
+# -o path matches their --output-type, and to derive output filenames in batch mode.
 _TRANSCRIBE_EXT_FOR_TYPE = {
     'markdown': '.md',
     'pdf': '.pdf',
     'text': '.txt',
 }
+
+# Media file extensions recognised by recursive batch mode for each --type.
+_TRANSCRIBE_MEDIA_EXTS = {
+    'audio': {'.mp3', '.wav', '.m4a', '.aac', '.flac', '.ogg'},
+    'video': {'.mp4', '.mov', '.m4v', '.avi', '.mkv', '.webm'},
+}
+
+
+def _iter_media_files(directory, content_type):
+    """Recursively yield media files under `directory` matching `content_type`."""
+    exts = _TRANSCRIBE_MEDIA_EXTS[content_type]
+    for root, _, files in os.walk(directory):
+        for name in sorted(files):
+            if os.path.splitext(name)[1].lower() in exts:
+                yield os.path.join(root, name)
 
 
 def _build_transcription_markdown(transcription_data):
@@ -1643,85 +1658,159 @@ def _write_transcription_pdf(markdown_content, pdf_path):
     HTML(string=html_doc).write_pdf(pdf_path, font_config=FontConfiguration())
 
 
+def _transcribe_one_file(input_path, output_path, args, access_token):
+    """Transcribe a single media file and write the result to `output_path`.
+
+    Raises on failure so the batch loop can catch and continue.
+    """
+    print(f"Uploading file to Azure Storage: {input_path}")
+    source_url = upload_to_azure_storage(input_path, debug=args.debug)
+    print(f"File uploaded successfully. Source URL: {source_url}")
+
+    job_info = transcribe_media(
+        access_token=access_token,
+        source_url=source_url,
+        target_locale=args.locale,
+        content_type=args.type,
+        debug=args.debug
+    )
+
+    if args.debug:
+        print(f"Job ID: {job_info['jobId']}")
+        print("Polling for job completion...")
+
+    result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
+
+    if 'outputs' not in result or not result['outputs']:
+        raise Exception("No outputs found in job response")
+
+    transcription_url = result['outputs'][0]['destination']['url']
+    if args.debug:
+        print(f"Downloading transcription from: {transcription_url}")
+
+    response = requests.get(transcription_url)
+    response.raise_for_status()
+    transcription_data = response.json()
+
+    output_path = os.path.abspath(output_path)
+    output_dir = os.path.dirname(output_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+
+    if args.output_type == 'markdown':
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(_build_transcription_markdown(transcription_data))
+        print(f"Transcription saved as markdown to: {output_path}")
+
+    elif args.output_type == 'pdf':
+        markdown_content = _build_transcription_markdown(transcription_data)
+        pdf_path = output_path if output_path.lower().endswith('.pdf') else os.path.splitext(output_path)[0] + '.pdf'
+        try:
+            _write_transcription_pdf(markdown_content, pdf_path)
+            print(f"Transcription saved as PDF to: {pdf_path}")
+        except ImportError:
+            # weasyprint isn't installed — fall back to markdown but still
+            # treat this as a successful transcription (the data is saved).
+            print("\nNote: PDF conversion requires additional packages (pip install markdown weasyprint).")
+            print("Saving as markdown instead...")
+            md_path = os.path.splitext(output_path)[0] + '.md'
+            with open(md_path, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
+            print(f"Transcription saved as markdown to: {md_path}")
+
+    else:  # text
+        with open(output_path, 'w', encoding='utf-8') as f:
+            for item in transcription_data:
+                f.write(f"{item[2]}\n\n")
+        print(f"Transcription saved as text to: {output_path}")
+
+
+def _resolve_batch_output_path(input_path, input_root, output_root, output_type):
+    """Pick the output path for `input_path` in batch mode.
+
+    If `output_root` is given, mirror the source's relative path under it.
+    Otherwise write next to the source file.
+    """
+    expected_ext = _TRANSCRIBE_EXT_FOR_TYPE[output_type]
+    if output_root:
+        rel = os.path.relpath(input_path, input_root)
+        rel_no_ext = os.path.splitext(rel)[0]
+        return os.path.join(output_root, rel_no_ext + expected_ext)
+    return os.path.splitext(input_path)[0] + expected_ext
+
+
 def handle_transcribe_command(args, access_token):
-    """Handle the transcribe command"""
+    """Handle the transcribe command (single-file or recursive batch)."""
     try:
-        # Validate output extension matches --output-type.
-        output_ext = os.path.splitext(args.output)[1].lower()
-        expected_ext = _TRANSCRIBE_EXT_FOR_TYPE[args.output_type]
-        known_exts = set(_TRANSCRIBE_EXT_FOR_TYPE.values())
-        if output_ext in known_exts and output_ext != expected_ext:
-            print(f"Error: Output file has {output_ext} extension but --output-type is '{args.output_type}' (expected {expected_ext}).")
-            print("Either change the output file extension or set --output-type to match.")
+        # Validate output extension matches --output-type (single-file mode only;
+        # in batch mode we derive the extension ourselves).
+        if args.output and not args.recursive:
+            output_ext = os.path.splitext(args.output)[1].lower()
+            expected_ext = _TRANSCRIBE_EXT_FOR_TYPE[args.output_type]
+            known_exts = set(_TRANSCRIBE_EXT_FOR_TYPE.values())
+            if output_ext in known_exts and output_ext != expected_ext:
+                print(f"Error: Output file has {output_ext} extension but --output-type is '{args.output_type}' (expected {expected_ext}).")
+                print("Either change the output file extension or set --output-type to match.")
+                sys.exit(1)
+
+        # ---- Batch (recursive) mode ----
+        if args.recursive:
+            if not os.path.isdir(args.input):
+                print(f"Error: --recursive requires -i to be a directory (got: {args.input})")
+                sys.exit(1)
+
+            input_root = os.path.abspath(args.input)
+            output_root = os.path.abspath(args.output) if args.output else None
+            files = list(_iter_media_files(input_root, args.type))
+
+            if not files:
+                exts = ", ".join(sorted(_TRANSCRIBE_MEDIA_EXTS[args.type]))
+                print(f"No {args.type} files (extensions: {exts}) found under {input_root}")
+                return
+
+            print(f"Found {len(files)} {args.type} file(s) under {input_root}")
+            succeeded = skipped = failed = 0
+
+            for idx, input_path in enumerate(files):
+                out_path = _resolve_batch_output_path(input_path, input_root, output_root, args.output_type)
+                rel_label = os.path.relpath(input_path, input_root)
+
+                if os.path.exists(out_path):
+                    print(f"[{idx+1}/{len(files)}] skip (exists): {rel_label}")
+                    skipped += 1
+                    continue
+
+                print(f"\n[{idx+1}/{len(files)}] {rel_label}")
+                try:
+                    _transcribe_one_file(input_path, out_path, args, access_token)
+                    succeeded += 1
+                except Exception as e:
+                    print(f"FAILED: {rel_label} — {e}")
+                    if args.debug:
+                        import traceback
+                        print(traceback.format_exc())
+                    failed += 1
+
+                # Throttle between files (skip the wait after the last one).
+                if args.throttle > 0 and idx < len(files) - 1:
+                    if args.debug:
+                        print(f"Sleeping {args.throttle}s before next file...")
+                    time.sleep(args.throttle)
+
+            print(f"\nDone. Succeeded: {succeeded}, skipped: {skipped}, failed: {failed}")
+            if failed:
+                sys.exit(1)
+            return
+
+        # ---- Single-file mode ----
+        if not args.output:
+            print("Error: -o/--output is required when not using --recursive")
+            sys.exit(1)
+        if os.path.isdir(args.input):
+            print(f"Error: -i is a directory ({args.input}). Add --recursive to process all files inside it.")
             sys.exit(1)
 
-        # Upload file to Azure Storage
-        print(f"Uploading file to Azure Storage: {args.input}")
-        source_url = upload_to_azure_storage(args.input, debug=args.debug)
-        print(f"File uploaded successfully. Source URL: {source_url}")
-
-        # Transcribe the media
-        job_info = transcribe_media(
-            access_token=access_token,
-            source_url=source_url,
-            target_locale=args.locale,
-            content_type=args.type,
-            debug=args.debug
-        )
-
-        if args.debug:
-            print(f"Job ID: {job_info['jobId']}")
-            print("Polling for job completion...")
-
-        # Poll the status URL until the job is complete
-        result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
-
-        if 'outputs' not in result or not result['outputs']:
-            raise Exception("No outputs found in job response")
-
-        # Get the transcription URL from the first output
-        transcription_url = result['outputs'][0]['destination']['url']
-
-        if args.debug:
-            print(f"Downloading transcription from: {transcription_url}")
-
-        # Download the transcription
-        response = requests.get(transcription_url)
-        response.raise_for_status()
-        transcription_data = response.json()
-
-        # Convert output path to absolute path and create directory if needed
-        output_path = os.path.abspath(args.output)
-        output_dir = os.path.dirname(output_path)
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
-
-        if args.output_type == 'markdown':
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(_build_transcription_markdown(transcription_data))
-            print(f"Transcription saved as markdown to: {output_path}")
-
-        elif args.output_type == 'pdf':
-            markdown_content = _build_transcription_markdown(transcription_data)
-            pdf_path = output_path if output_path.lower().endswith('.pdf') else os.path.splitext(output_path)[0] + '.pdf'
-            try:
-                _write_transcription_pdf(markdown_content, pdf_path)
-                print(f"Transcription saved as PDF to: {pdf_path}")
-            except ImportError:
-                # weasyprint isn't installed — fall back to markdown but still
-                # treat this as a successful transcription (the data is saved).
-                print("\nNote: PDF conversion requires additional packages (pip install markdown weasyprint).")
-                print("Saving as markdown instead...")
-                md_path = os.path.splitext(output_path)[0] + '.md'
-                with open(md_path, 'w', encoding='utf-8') as f:
-                    f.write(markdown_content)
-                print(f"Transcription saved as markdown to: {md_path}")
-
-        else:  # text
-            with open(output_path, 'w', encoding='utf-8') as f:
-                for item in transcription_data:
-                    f.write(f"{item[2]}\n\n")
-            print(f"Transcription saved as text to: {output_path}")
+        _transcribe_one_file(args.input, args.output, args, access_token)
 
     except Exception as e:
         print(f"Error: {str(e)}")

@@ -153,14 +153,21 @@ def create_parser():
 
     # Transcription command
     transcribe_parser = subparsers.add_parser('transcribe', aliases=['trans'], help='Transcribe audio or video content')
-    transcribe_parser.add_argument('-i', '--input', required=True, help='Path to the media file to transcribe')
-    transcribe_parser.add_argument('-o', '--output', required=True, help='Output file path for the transcription')
+    transcribe_parser.add_argument('-i', '--input', required=True,
+                                help='Path to the media file (or directory, with -r) to transcribe')
+    transcribe_parser.add_argument('-o', '--output',
+                                help='Output file path (single-file mode) or output directory (batch mode). '
+                                     'In batch mode, defaults to writing next to each source file.')
     transcribe_parser.add_argument('-t', '--type', choices=['audio', 'video'], required=True,
                                 help='Type of media to transcribe')
     transcribe_parser.add_argument('-l', '--locale', default='en-US',
                                 help='Target language locale code (default: en-US)')
     transcribe_parser.add_argument('--output-type', choices=['text', 'markdown', 'pdf'], default='text',
                                 help='Output format (text, markdown, or pdf)')
+    transcribe_parser.add_argument('-r', '--recursive', action='store_true',
+                                help='Treat -i as a directory and recursively transcribe all matching media files')
+    transcribe_parser.add_argument('--throttle', type=float, default=30.0,
+                                help='Seconds to sleep between files in batch mode to avoid rate limits (default: 30)')
     transcribe_parser.add_argument('-d', '--debug', action='store_true',
                                 help='Show debug information including full HTTP request details')
     transcribe_parser.add_argument('-silent', '--silent', action='store_true',
