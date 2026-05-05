@@ -1597,161 +1597,132 @@ def format_time(seconds):
     seconds = int(seconds % 60)
     return f"{minutes:02d}:{seconds:02d}"
 
+
+# Map output_type → expected file extension. Used to validate that the user's
+# -o path matches their --output-type.
+_TRANSCRIBE_EXT_FOR_TYPE = {
+    'markdown': '.md',
+    'pdf': '.pdf',
+    'text': '.txt',
+}
+
+
+def _build_transcription_markdown(transcription_data):
+    """Render the transcribe API response as Markdown."""
+    parts = ["# Transcription\n\n"]
+    for item in transcription_data:
+        start_time, end_time, text, speaker = item[0], item[1], item[2], item[3]
+        parts.append(f"### {speaker}\n\n")
+        parts.append(f"*Time Range:* {format_time(start_time)} - {format_time(end_time)}\n\n")
+        parts.append(f"{text}\n\n")
+    return "".join(parts)
+
+
+def _write_transcription_pdf(markdown_content, pdf_path):
+    """Render markdown to PDF. Raises ImportError if weasyprint isn't installed."""
+    import markdown
+    from weasyprint import HTML
+    from weasyprint.text.fonts import FontConfiguration
+
+    html_body = markdown.markdown(markdown_content)
+    html_doc = f"""
+    <html>
+    <head>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; }}
+            h1 {{ color: #333; }}
+            h3 {{ color: #666; margin-top: 20px; }}
+            em {{ color: #888; }}
+        </style>
+    </head>
+    <body>
+        {html_body}
+    </body>
+    </html>
+    """
+    HTML(string=html_doc).write_pdf(pdf_path, font_config=FontConfiguration())
+
+
 def handle_transcribe_command(args, access_token):
     """Handle the transcribe command"""
     try:
-        # Validate file extension matches output type
+        # Validate output extension matches --output-type.
         output_ext = os.path.splitext(args.output)[1].lower()
-        if output_ext == '.pdf' and args.output_type != 'pdf':
-            print(f"Error: Output file has .pdf extension but --output-type is set to '{args.output_type}'")
-            print("Please either:")
-            print("1. Change the output file extension to match the output type")
-            print("2. Set --output-type to 'pdf' to match the file extension")
+        expected_ext = _TRANSCRIBE_EXT_FOR_TYPE[args.output_type]
+        known_exts = set(_TRANSCRIBE_EXT_FOR_TYPE.values())
+        if output_ext in known_exts and output_ext != expected_ext:
+            print(f"Error: Output file has {output_ext} extension but --output-type is '{args.output_type}' (expected {expected_ext}).")
+            print("Either change the output file extension or set --output-type to match.")
             sys.exit(1)
-        elif output_ext == '.md' and args.output_type != 'markdown':
-            print(f"Error: Output file has .md extension but --output-type is set to '{args.output_type}'")
-            print("Please either:")
-            print("1. Change the output file extension to match the output type")
-            print("2. Set --output-type to 'markdown' to match the file extension")
-            sys.exit(1)
-        
-        # Get access token
-        access_token = retrieve_access_token(debug=args.debug)
-        
+
         # Upload file to Azure Storage
         print(f"Uploading file to Azure Storage: {args.input}")
         source_url = upload_to_azure_storage(args.input, debug=args.debug)
         print(f"File uploaded successfully. Source URL: {source_url}")
-        
+
         # Transcribe the media
         job_info = transcribe_media(
             access_token=access_token,
             source_url=source_url,
             target_locale=args.locale,
             content_type=args.type,
-            text_only=args.text_only,
             debug=args.debug
         )
-        
+
         if args.debug:
             print(f"Job ID: {job_info['jobId']}")
             print("Polling for job completion...")
-        
+
         # Poll the status URL until the job is complete
         result = check_job_status(job_info['statusUrl'], access_token, args.silent, args.debug)
-        
+
         if 'outputs' not in result or not result['outputs']:
             raise Exception("No outputs found in job response")
-            
+
         # Get the transcription URL from the first output
         transcription_url = result['outputs'][0]['destination']['url']
-        
+
         if args.debug:
             print(f"Downloading transcription from: {transcription_url}")
-        
+
         # Download the transcription
         response = requests.get(transcription_url)
         response.raise_for_status()
         transcription_data = response.json()
-        
+
         # Convert output path to absolute path and create directory if needed
         output_path = os.path.abspath(args.output)
         output_dir = os.path.dirname(output_path)
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-        
-        # Process the output based on the format
+
         if args.output_type == 'markdown':
-            # Convert to markdown format
-            markdown_content = "# Transcription\n\n"
-            for item in transcription_data:
-                start_time = item[0]
-                end_time = item[1]
-                text = item[2]
-                speaker = item[3]
-                
-                markdown_content += f"### {speaker}\n\n"
-                markdown_content += f"*Time Range:* {format_time(start_time)} - {format_time(end_time)}\n\n"
-                markdown_content += f"{text}\n\n"
-            
-            # Write markdown file
             with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(markdown_content)
-            
+                f.write(_build_transcription_markdown(transcription_data))
             print(f"Transcription saved as markdown to: {output_path}")
-            
+
         elif args.output_type == 'pdf':
-            # First create markdown content
-            markdown_content = "# Transcription\n\n"
-            for item in transcription_data:
-                start_time = item[0]
-                end_time = item[1]
-                text = item[2]
-                speaker = item[3]
-                
-                markdown_content += f"### {speaker}\n\n"
-                markdown_content += f"*Time Range:* {format_time(start_time)} - {format_time(end_time)}\n\n"
-                markdown_content += f"{text}\n\n"
-            
-            # Try to convert markdown to PDF
+            markdown_content = _build_transcription_markdown(transcription_data)
+            pdf_path = output_path if output_path.lower().endswith('.pdf') else os.path.splitext(output_path)[0] + '.pdf'
             try:
-                import markdown
-                from weasyprint import HTML, CSS
-                from weasyprint.text.fonts import FontConfiguration
-                
-                pdf_path = output_path
-                if not pdf_path.lower().endswith('.pdf'):
-                    pdf_path = os.path.splitext(output_path)[0] + '.pdf'
-                
-                # Convert markdown to HTML
-                html_content = markdown.markdown(markdown_content)
-                
-                # Add some basic styling
-                html_content = f"""
-                <html>
-                <head>
-                    <style>
-                        body {{ font-family: Arial, sans-serif; margin: 40px; }}
-                        h1 {{ color: #333; }}
-                        h3 {{ color: #666; margin-top: 20px; }}
-                        em {{ color: #888; }}
-                    </style>
-                </head>
-                <body>
-                    {html_content}
-                </body>
-                </html>
-                """
-                
-                # Configure fonts
-                font_config = FontConfiguration()
-                
-                # Convert HTML to PDF
-                HTML(string=html_content).write_pdf(
-                    pdf_path,
-                    font_config=font_config
-                )
+                _write_transcription_pdf(markdown_content, pdf_path)
                 print(f"Transcription saved as PDF to: {pdf_path}")
-            except ImportError as e:
-                print("\nError: PDF conversion requires additional packages.")
-                print("To enable PDF output, please install the required packages using:")
-                print("pip install markdown weasyprint")
-                print("\nSaving as markdown instead...")
-                # Save as markdown with .md extension
+            except ImportError:
+                # weasyprint isn't installed — fall back to markdown but still
+                # treat this as a successful transcription (the data is saved).
+                print("\nNote: PDF conversion requires additional packages (pip install markdown weasyprint).")
+                print("Saving as markdown instead...")
                 md_path = os.path.splitext(output_path)[0] + '.md'
                 with open(md_path, 'w', encoding='utf-8') as f:
                     f.write(markdown_content)
                 print(f"Transcription saved as markdown to: {md_path}")
-                sys.exit(1)
-            
-        else:  # text format
-            # Write only the text content with double newlines between items
+
+        else:  # text
             with open(output_path, 'w', encoding='utf-8') as f:
                 for item in transcription_data:
                     f.write(f"{item[2]}\n\n")
-            
             print(f"Transcription saved as text to: {output_path}")
-            
+
     except Exception as e:
         print(f"Error: {str(e)}")
         if args.debug:
@@ -2338,19 +2309,6 @@ def process_tasks_parallel(tasks, rate_limiter):
                 results.append(False)
     
     return results
-
-def add_transcribe_command(subparsers):
-    """Add the transcribe command to the CLI"""
-    transcribe_parser = subparsers.add_parser('transcribe', help='Transcribe audio or video content')
-    transcribe_parser.add_argument('-i', '--input', required=True, help='Input file path')
-    transcribe_parser.add_argument('-o', '--output', required=True, help='Output file path')
-    transcribe_parser.add_argument('-l', '--locale', default='en-US', help='Target locale (default: en-US)')
-    transcribe_parser.add_argument('-t', '--type', required=True, choices=['audio', 'video'], help='Media type (audio or video)')
-    transcribe_parser.add_argument('--text-only', action='store_true', help='Return only the transcript text')
-    transcribe_parser.add_argument('--output-type', choices=['text', 'markdown', 'pdf'], default='text',
-                                 help='Output format (text, markdown, or pdf)')
-    transcribe_parser.add_argument('-d', '--debug', action='store_true', help='Enable debug output')
-    transcribe_parser.set_defaults(func=handle_transcribe_command)
 
 def handle_list_custom_models_command(args, access_token):
     """List available custom models for Firefly."""

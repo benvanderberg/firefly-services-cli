@@ -1,4 +1,5 @@
 import os
+import uuid
 import mimetypes
 from datetime import datetime, timedelta, UTC
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
@@ -6,6 +7,13 @@ from urllib.parse import urlparse, parse_qs, quote
 from azure.core.exceptions import AzureError
 import time
 from tqdm import tqdm
+
+
+def _mask(value, keep=8):
+    """Mask a secret for debug output, showing only the first `keep` characters."""
+    if not value:
+        return None
+    return value[:keep] + "..." if len(value) > keep else "***"
 
 def upload_to_azure_storage(file_path, debug=False):
     """
@@ -25,17 +33,13 @@ def upload_to_azure_storage(file_path, debug=False):
     
     if debug:
         print("\nEnvironment Variables:")
-        print("FIREFLY_SERVICES_CLIENT_ID:", os.environ.get('FIREFLY_SERVICES_CLIENT_ID'))
-        print("FIREFLY_SERVICES_CLIENT_SECRET:", os.environ.get('FIREFLY_SERVICES_CLIENT_SECRET'))
+        print("FIREFLY_SERVICES_CLIENT_ID:", _mask(os.environ.get('FIREFLY_SERVICES_CLIENT_ID')))
+        print("FIREFLY_SERVICES_CLIENT_SECRET:", _mask(os.environ.get('FIREFLY_SERVICES_CLIENT_SECRET'), keep=4))
         print("STORAGE_TYPE:", os.environ.get('STORAGE_TYPE'))
-        print("AZURE_SAS_TOKEN:", sas_token[:20] + "..." if sas_token else None)
+        print("AZURE_SAS_TOKEN:", _mask(sas_token, keep=20))
         print("AZURE_STORAGE_CONTAINER:", container_name)
         print("AZURE_STORAGE_ACCOUNT:", account_name)
         print("THROTTLE_LIMIT_FIREFLY:", os.environ.get('THROTTLE_LIMIT_FIREFLY'))
-        print("\nAzure Storage Configuration:")
-        print(f"Container Name: {container_name}")
-        print(f"Account Name: {account_name}")
-        print(f"SAS Token (first 20 chars): {sas_token[:20]}..." if sas_token else None)
     
     if not sas_token or not container_name or not account_name:
         raise ValueError("Azure Storage credentials not found in environment variables")
@@ -64,14 +68,18 @@ def upload_to_azure_storage(file_path, debug=False):
                 print(f"Error creating container client: {str(e)}")
             raise
         
-        # Get file name and content type
-        file_name = os.path.basename(file_path)
+        # Get file name and content type. Prefix the blob name with a UUID so two
+        # files sharing a basename in different folders don't overwrite each other.
+        original_name = os.path.basename(file_path)
+        ext = os.path.splitext(original_name)[1]
+        blob_name = f"{uuid.uuid4().hex}{ext}"
         content_type, _ = mimetypes.guess_type(file_path)
-        
+
         if debug:
             print(f"\nPreparing to upload file:")
             print(f"File path: {file_path}")
-            print(f"File name: {file_name}")
+            print(f"Original name: {original_name}")
+            print(f"Blob name: {blob_name}")
             print(f"Content Type: {content_type}")
         
         # Check if file exists
@@ -89,22 +97,19 @@ def upload_to_azure_storage(file_path, debug=False):
                 print("\nStarting file upload...")
             
             start_time = time.time()
-            timeout = 30  # 30 seconds timeout
-            
+
             # Create a blob client
-            blob_client = container_client.get_blob_client(file_name)
-            
-            # Upload the file with progress bar
+            blob_client = container_client.get_blob_client(blob_name)
+
+            # Upload the file with progress bar. No SDK-level timeout — large media
+            # files on slow connections need to be allowed to finish.
             with open(file_path, "rb") as data:
-                # Create progress bar
-                with tqdm(total=file_size, unit='B', unit_scale=True, desc=f"Uploading {file_name}") as pbar:
-                    # Upload in chunks and update progress bar
+                with tqdm(total=file_size, unit='B', unit_scale=True, desc=f"Uploading {original_name}") as pbar:
                     blob_client.upload_blob(
                         data,
                         overwrite=True,
                         content_type=content_type,
-                        timeout=timeout,
-                        max_concurrency=1,  # Ensure sequential upload for accurate progress
+                        max_concurrency=1,  # Sequential upload for accurate progress
                         progress_hook=lambda current, total: pbar.update(current - pbar.n)
                     )
             
@@ -127,7 +132,7 @@ def upload_to_azure_storage(file_path, debug=False):
             print("\nGenerating URL for the blob...")
         
         # Generate the URL with the SAS token
-        url = f"https://{account_name}.blob.core.windows.net/{container_name}/{quote(file_name)}?{sas_token}"
+        url = f"https://{account_name}.blob.core.windows.net/{container_name}/{quote(blob_name)}?{sas_token}"
         
         if debug:
             print("URL generated successfully")

@@ -2,18 +2,17 @@ import os
 import requests
 import json
 
-def transcribe_media(access_token, source_url, target_locale, content_type="video", text_only=False, debug=False):
+def transcribe_media(access_token, source_url, target_locale, content_type="video", debug=False):
     """
     Transcribe audio or video content.
-    
+
     Args:
         access_token (str): The authentication token
         source_url (str): URL of the source media file
         target_locale (str): Target language locale code (e.g., 'en-US')
         content_type (str): Type of content ('video' or 'audio')
-        text_only (bool): Whether to return only the transcript text
         debug (bool): Whether to show debug information
-    
+
     Returns:
         dict: The job information including jobId and statusUrl
     """
