@@ -2,7 +2,7 @@ import os
 import mimetypes
 from datetime import datetime, timedelta, UTC
 from azure.storage.blob import BlobServiceClient, generate_blob_sas, BlobSasPermissions
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, quote
 from azure.core.exceptions import AzureError
 import time
 from tqdm import tqdm
@@ -127,7 +127,7 @@ def upload_to_azure_storage(file_path, debug=False):
             print("\nGenerating URL for the blob...")
         
         # Generate the URL with the SAS token
-        url = f"https://{account_name}.blob.core.windows.net/{container_name}/{file_name}?{sas_token}"
+        url = f"https://{account_name}.blob.core.windows.net/{container_name}/{quote(file_name)}?{sas_token}"
         
         if debug:
             print("URL generated successfully")
