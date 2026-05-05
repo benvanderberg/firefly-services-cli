@@ -166,8 +166,12 @@ def create_parser():
                                 help='Output format (text, markdown, or pdf)')
     transcribe_parser.add_argument('-r', '--recursive', action='store_true',
                                 help='Treat -i as a directory and recursively transcribe all matching media files')
-    transcribe_parser.add_argument('--throttle', type=float, default=30.0,
-                                help='Seconds to sleep between files in batch mode to avoid rate limits (default: 30)')
+    transcribe_parser.add_argument('--max-concurrent', type=int, default=1,
+                                help='Number of files to transcribe in parallel in batch mode (default: 1, sequential)')
+    transcribe_parser.add_argument('--rate-limit', default='5/60',
+                                help='Max submissions per period as N/T seconds (default: 5/60, i.e. 5 per minute). Applies to batch mode.')
+    transcribe_parser.add_argument('--throttle', type=float, default=0.0,
+                                help='Minimum seconds between submissions in batch mode (default: 0). Stacks on top of --rate-limit.')
     transcribe_parser.add_argument('-d', '--debug', action='store_true',
                                 help='Show debug information including full HTTP request details')
     transcribe_parser.add_argument('-silent', '--silent', action='store_true',

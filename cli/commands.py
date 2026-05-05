@@ -5,6 +5,8 @@ import time
 import asyncio
 import requests
 import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from datetime import datetime, timedelta, UTC
 from tabulate import tabulate
 from typing import List, Dict, Any, Optional, Union, Tuple
@@ -1658,14 +1660,19 @@ def _write_transcription_pdf(markdown_content, pdf_path):
     HTML(string=html_doc).write_pdf(pdf_path, font_config=FontConfiguration())
 
 
-def _transcribe_one_file(input_path, output_path, args, access_token):
+def _transcribe_one_file(input_path, output_path, args, access_token, rate_limiter=None):
     """Transcribe a single media file and write the result to `output_path`.
 
-    Raises on failure so the batch loop can catch and continue.
+    Raises on failure so the batch loop can catch and continue. If `rate_limiter`
+    is provided, blocks before submitting the transcribe job (the rate-limited
+    operation; the Azure upload is not subject to Adobe's API limit).
     """
     print(f"Uploading file to Azure Storage: {input_path}")
     source_url = upload_to_azure_storage(input_path, debug=args.debug)
     print(f"File uploaded successfully. Source URL: {source_url}")
+
+    if rate_limiter is not None:
+        rate_limiter.acquire()
 
     job_info = transcribe_media(
         access_token=access_token,
@@ -1739,6 +1746,14 @@ def _resolve_batch_output_path(input_path, input_root, output_root, output_type)
     return os.path.splitext(input_path)[0] + expected_ext
 
 
+def _parse_rate_limit(spec):
+    """Parse 'N/T' rate-limit spec into (max_calls, period_seconds)."""
+    m = re.match(r'^\s*(\d+)\s*/\s*(\d+)\s*$', spec or '')
+    if not m:
+        raise ValueError(f"Invalid --rate-limit format: {spec!r}. Use 'N/T' (e.g. '5/60').")
+    return int(m.group(1)), int(m.group(2))
+
+
 def handle_transcribe_command(args, access_token):
     """Handle the transcribe command (single-file or recursive batch)."""
     try:
@@ -1758,6 +1773,9 @@ def handle_transcribe_command(args, access_token):
             if not os.path.isdir(args.input):
                 print(f"Error: --recursive requires -i to be a directory (got: {args.input})")
                 sys.exit(1)
+            if args.max_concurrent < 1:
+                print(f"Error: --max-concurrent must be >= 1 (got {args.max_concurrent})")
+                sys.exit(1)
 
             input_root = os.path.abspath(args.input)
             output_root = os.path.abspath(args.output) if args.output else None
@@ -1768,34 +1786,59 @@ def handle_transcribe_command(args, access_token):
                 print(f"No {args.type} files (extensions: {exts}) found under {input_root}")
                 return
 
-            print(f"Found {len(files)} {args.type} file(s) under {input_root}")
-            succeeded = skipped = failed = 0
-
-            for idx, input_path in enumerate(files):
+            # Filter out already-transcribed files up front so the rate limiter
+            # and worker pool only see real work.
+            tasks = []
+            skipped = 0
+            for input_path in files:
                 out_path = _resolve_batch_output_path(input_path, input_root, output_root, args.output_type)
                 rel_label = os.path.relpath(input_path, input_root)
-
                 if os.path.exists(out_path):
-                    print(f"[{idx+1}/{len(files)}] skip (exists): {rel_label}")
+                    print(f"skip (exists): {rel_label}")
                     skipped += 1
                     continue
+                tasks.append((input_path, out_path, rel_label))
 
-                print(f"\n[{idx+1}/{len(files)}] {rel_label}")
+            print(f"Found {len(files)} {args.type} file(s) under {input_root} "
+                  f"({len(tasks)} to process, {skipped} already done)")
+            if not tasks:
+                print(f"\nDone. Succeeded: 0, skipped: {skipped}, failed: 0")
+                return
+
+            max_calls, period = _parse_rate_limit(args.rate_limit)
+            rate_limiter = RateLimiter(max_calls=max_calls, period=period, min_delay=args.throttle)
+            print(f"Running {args.max_concurrent} worker(s) with rate limit {max_calls}/{period}s"
+                  + (f" + min-delay {args.throttle}s" if args.throttle > 0 else ""))
+
+            succeeded = failed = 0
+            total = len(tasks)
+            done = 0
+            done_lock = Lock()
+
+            def _run(task):
+                input_path, out_path, rel_label = task
                 try:
-                    _transcribe_one_file(input_path, out_path, args, access_token)
-                    succeeded += 1
+                    _transcribe_one_file(input_path, out_path, args, access_token, rate_limiter=rate_limiter)
+                    return ('ok', rel_label, None)
                 except Exception as e:
-                    print(f"FAILED: {rel_label} — {e}")
                     if args.debug:
                         import traceback
-                        print(traceback.format_exc())
-                    failed += 1
+                        return ('fail', rel_label, f"{e}\n{traceback.format_exc()}")
+                    return ('fail', rel_label, str(e))
 
-                # Throttle between files (skip the wait after the last one).
-                if args.throttle > 0 and idx < len(files) - 1:
-                    if args.debug:
-                        print(f"Sleeping {args.throttle}s before next file...")
-                    time.sleep(args.throttle)
+            with ThreadPoolExecutor(max_workers=args.max_concurrent) as pool:
+                future_to_task = {pool.submit(_run, t): t for t in tasks}
+                for future in as_completed(future_to_task):
+                    status, rel_label, err = future.result()
+                    with done_lock:
+                        done += 1
+                        prefix = f"[{done}/{total}]"
+                    if status == 'ok':
+                        succeeded += 1
+                        print(f"{prefix} done: {rel_label}")
+                    else:
+                        failed += 1
+                        print(f"{prefix} FAILED: {rel_label} — {err}")
 
             print(f"\nDone. Succeeded: {succeeded}, skipped: {skipped}, failed: {failed}")
             if failed:
