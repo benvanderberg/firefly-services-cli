@@ -171,6 +171,8 @@ def handle_command(args):
         handle_pdf_upload_command(args, access_token)
     elif args.command == 'pdf':
         handle_pdf_command(args, access_token)
+    elif args.command == 'manifest':
+        handle_manifest_command(args, access_token)
     else:
         print(f"Unknown command: {args.command}")
         sys.exit(1)
@@ -1089,7 +1091,14 @@ def handle_tts_command(args, access_token):
                         
                         if result.get('status') == 'succeeded' and 'output' in result:
                             # Download the audio file
-                            audio_url = result['output']['url']
+                            # The API returns output.destination.url, not output.url
+                            if 'destination' in result['output'] and 'url' in result['output']['destination']:
+                                audio_url = result['output']['destination']['url']
+                            elif 'url' in result['output']:
+                                audio_url = result['output']['url']
+                            else:
+                                print(f"Error: No URL found in result output: {result['output']}")
+                                return False
                             
                             # Download the file
                             try:
@@ -3505,6 +3514,50 @@ def handle_pdf_upload_command(args, access_token):
         sys.exit(1)
     except Exception as e:
         print(f"Error uploading file: {e}")
+        if args.debug:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+def handle_manifest_command(args, access_token):
+    """Handle the manifest creation command."""
+    from services.manifest import create_manifest
+    import os
+    
+    # Validate input file exists
+    if not os.path.exists(args.input):
+        print(f"Error: Input file '{args.input}' does not exist")
+        sys.exit(1)
+    
+    # Check if input file is a PSD file
+    if not args.input.lower().endswith('.psd'):
+        print(f"Error: Input file must be a PSD file (.psd extension)")
+        sys.exit(1)
+    
+    if not args.silent:
+        print(f"Creating manifest for: {args.input}")
+        print(f"Output will be saved to: {args.output}")
+    
+    if args.verbose and not args.silent:
+        print("Starting manifest creation process...")
+    
+    try:
+        manifest_data = create_manifest(
+            access_token=access_token,
+            input_file_path=args.input,
+            output_file_path=args.output,
+            debug=args.debug,
+            verbose=args.verbose
+        )
+        
+        if not args.silent:
+            print("✓ Manifest created successfully!")
+            print(f"Manifest saved to: {args.output}")
+        else:
+            print(f"Manifest created: {args.output}")
+        
+    except Exception as e:
+        print(f"Error creating manifest: {e}")
         if args.debug:
             import traceback
             traceback.print_exc()

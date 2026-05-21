@@ -3,6 +3,7 @@
 FIREFLY_SERVICES_CLIENT_ID=your_client_id_here
 FIREFLY_SERVICES_CLIENT_SECRET=your_client_secret_here
 FIREFLY_SERVICES_SCOPE=openid,AdobeID,session,additional_info,read_organizations,firefly_api,ff_apis
+FIREFLY_SERVICES_ORG_ID=your_org_id_here
 
 # Azure Storage configuration
 # Get these from your Azure Storage Account in the Azure Portal

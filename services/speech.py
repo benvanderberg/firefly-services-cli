@@ -147,7 +147,7 @@ def generate_speech(access_token, text, voice_id, locale_code="en-US", debug=Fal
         },
         'voiceId': voice_id,
         'output': {
-            'mediaType': 'audio/mp3'
+            'mediaType': 'audio/wav'
         }
     }
 

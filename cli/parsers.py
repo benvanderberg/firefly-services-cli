@@ -225,6 +225,14 @@ def create_parser():
     pdf_upload_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information')
     pdf_upload_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
 
+    # Manifest command
+    manifest_parser = subparsers.add_parser('manifest', help='Create a manifest for a PSD file using Adobe PIE API')
+    manifest_parser.add_argument('-i', '--input', required=True, help='Path to the input PSD file')
+    manifest_parser.add_argument('-o', '--output', required=True, help='Output file path for the manifest JSON')
+    manifest_parser.add_argument('-d', '--debug', action='store_true', help='Show debug information')
+    manifest_parser.add_argument('-v', '--verbose', action='store_true', help='Show verbose output')
+    manifest_parser.add_argument('-silent', '--silent', action='store_true', help='Minimize output messages')
+
     # PDF conversion command
     pdf_parser = subparsers.add_parser('pdf', help='Convert, export, compress, OCR, linearize, auto-tag, or watermark PDF files using Adobe PDF Services')
     pdf_parser.add_argument('--export', action='store_true', help='Export PDF to another format (instead of converting to PDF)')
