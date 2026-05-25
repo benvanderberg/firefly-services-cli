@@ -52,30 +52,36 @@ def create_manifest(
         }
     }
     
+    # Check if required environment variables are set
+    if not os.environ.get('FIREFLY_SERVICES_ORG_ID'):
+        raise ValueError("FIREFLY_SERVICES_ORG_ID environment variable is required for manifest creation")
+
     # Prepare headers
     headers = {
         'Content-Type': 'application/json',
         'x-api-key': os.environ['FIREFLY_SERVICES_CLIENT_ID'],
-        'x-gw-ims-org-id': os.environ.get('FIREFLY_SERVICES_ORG_ID', '')
+        'x-gw-ims-org-id': os.environ['FIREFLY_SERVICES_ORG_ID'],
+        'Authorization': f'Bearer {access_token}'
     }
-    
-    # Check if required environment variables are set
-    if not os.environ.get('FIREFLY_SERVICES_ORG_ID'):
-        raise ValueError("FIREFLY_SERVICES_ORG_ID environment variable is required for manifest creation")
-    
+
     # Make the API request to Adobe PIE
     url = 'https://image.adobe.io/pie/psdService/documentManifest'
-    
+
     if debug:
+        redacted_headers = {**headers, 'Authorization': '<redacted>', 'x-api-key': '<redacted>'}
+        redacted_payload = {
+            **payload,
+            'inputs': [{**payload['inputs'][0], 'href': '<redacted SAS URL>'}],
+        }
         print("Making request to Adobe PIE API...")
         print("Request URL:", url)
-        print("Request headers:", json.dumps(headers, indent=2))
-        print("Request payload:", json.dumps(payload, indent=2))
+        print("Request headers:", json.dumps(redacted_headers, indent=2))
+        print("Request payload:", json.dumps(redacted_payload, indent=2))
     elif verbose:
         print("Making request to Adobe PIE API...")
-    
+
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=(10, 60))
         
         if debug:
             print(f"Response status: {response.status_code}")
@@ -103,7 +109,7 @@ def create_manifest(
         if debug:
             print(f"HTTP Error: {e}")
             print(f"Response content: {e.response.text}")
-        raise Exception(f"Failed to create manifest: HTTP {e.response.status_code} - {e.response.text}")
+        raise Exception(f"Failed to create manifest: HTTP {e.response.status_code}")
     except requests.exceptions.RequestException as e:
         if debug:
             print(f"Request Error: {e}")
